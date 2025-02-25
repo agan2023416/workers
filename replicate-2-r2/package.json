@@ -1,0 +1,21 @@
+{
+  "name": "replicate-2-r2",
+  "version": "1.0.0",
+  "description": "Cloudflare Worker for generating images with Replicate and storing them in R2",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --remote",
+    "dev:local": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cloudflare/workers-types": "^4.20240208.0",
+    "replicate": "^0.25.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3",
+    "wrangler": "^3.28.1"
+  }
+}

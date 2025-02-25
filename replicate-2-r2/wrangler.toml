@@ -1,0 +1,36 @@
+name = "replicate-worker"
+main = "src/index.ts"
+compatibility_date = "2023-12-01"
+
+# Enable observability
+[observability]
+enabled = true
+
+# R2 bucket configuration
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "blog-gnc-dev"
+preview_bucket_name = "blog-gnc-dev"
+
+# Production environment variables
+[vars]
+BUCKET_URL = "https://pub-af5b8d90196c4c9a99b39202782ef984.r2.dev"
+
+# Development environment
+[env.dev]
+name = "replicate-worker-dev"
+
+# Note: Development environment variables are defined in .dev.vars
+# - WORKER_API_TOKEN
+# - REPLICATE_API_TOKEN
+# - REPLICATE_WEBHOOK_SECRET
+# - BUCKET_URL
+
+# Note: For production, set these secrets using `wrangler secret put`:
+# - WORKER_API_TOKEN (used by MCP to authenticate with this worker)
+# - REPLICATE_API_TOKEN (used to authenticate with Replicate's API)
+# - REPLICATE_WEBHOOK_SECRET (used to verify Replicate webhooks)
+
+# Uncomment to enable smart placement
+# [placement]
+# mode = "smart"
