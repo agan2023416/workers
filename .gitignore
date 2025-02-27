@@ -6,4 +6,6 @@ dist/
 .DS_Store
 .vscode/
 .wrangler/
+replicate-2-r2/API.md
+replicate-2-r2/wrangler.toml
 .gitignore
