@@ -18,6 +18,10 @@ For detailed API documentation including request/response formats and examples, 
 
 ## MCP Integration
 
+### Overview
+
+This worker is designed to work seamlessly with MCP servers, particularly with the [generate-image](../mcps/generate-image) MCP server implementation. The integration provides a complete solution for AI image generation through MCP.
+
 ### Flow Diagram
 
 ```mermaid
@@ -41,6 +45,21 @@ sequenceDiagram
     Note over MCP Server,Worker: Alternative Implementation
     Worker-->>MCP Server: Webhook: Update with final URL
 ```
+
+### MCP Server Implementation
+
+We provide a reference implementation of an MCP server in the [generate-image](../mcps/generate-image) directory. This server:
+
+1. Provides a simple interface for image generation
+2. Handles authentication and API communication
+3. Manages asynchronous generation flow
+4. Supports real-time status updates
+
+To use this implementation:
+
+1. Navigate to the [generate-image](../mcps/generate-image) directory
+2. Follow the setup instructions in its README
+3. Configure your MCP settings as described in the implementation
 
 ### MCP Server Configuration
 
@@ -69,75 +88,6 @@ Make sure to replace:
 - `PATH_TO_YOUR_GENERATE_IMAGE_SERVER`: Path to your generate-image server JavaScript file
 - `YOUR_WORKER_API_TOKEN`: Your Cloudflare worker API token
 - `YOUR_WORKER_URL`: Your Cloudflare worker URL
-
-### MCP Server Example
-
-```typescript
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { z } from 'zod';
-
-// Initialize the server
-const server = new McpServer({
-    name: 'YOUR_SERVER_NAME',
-    version: 'YOUR_VERSION',
-});
-
-// Basic tool registration
-server.tool(
-    'generate',
-    'Generate image using Flux model',
-    {
-        prompt: z.string().describe('The prompt for the image'),
-    },
-    async ({ prompt }) => {
-        try {
-            const timestamp = Date.now();
-            const slug = `img-${timestamp}`;
-
-            // Call the Worker API
-            const workerResponse = await fetch(`${process.env.CLOUDFLARE_WORKERS_URL}`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${process.env.WORKER_API_TOKEN}`,
-                },
-                body: JSON.stringify({
-                    prompt: prompt,
-                    model: "YOUR_MODEL_NAME",
-                    webhook: `${process.env.CLOUDFLARE_WORKERS_URL}`,
-                    webhookEvents: ["completed"]
-                })
-            });
-
-            if (!workerResponse.ok) {
-                const error = await workerResponse.json();
-                throw new Error(error.error || 'Worker API error');
-            }
-
-            const result = await workerResponse.json();
-
-            // Return the result
-            return {
-                content: [{
-                    type: 'text' as const,
-                    text: `Generation started!\nPrediction ID: ${result.id}\nImage URL: ${result.imageUrl}\nStatus: ${result.status}`
-                }]
-            };
-        } catch (error) {
-            console.error('Error:', error);
-            throw error;
-        }
-    }
-);
-
-// Start the server
-const transport = new StdioServerTransport();
-server.connect(transport).catch(error => {
-    console.error('Server error:', error);
-    process.exit(1);
-});
-```
 
 ### Implementation Notes
 
