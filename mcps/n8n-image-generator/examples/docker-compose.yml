@@ -1,0 +1,83 @@
+version: '3.8'
+
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    restart: always
+    ports:
+      - "5678:5678"
+    environment:
+      # ⚠️ 关键配置：启用社区节点作为工具使用
+      - N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=true
+      
+      # 数据库配置 (推荐)
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=n8n
+      - DB_POSTGRESDB_USER=n8n
+      - DB_POSTGRESDB_PASSWORD=n8n_password
+      
+      # MCP服务器环境变量
+      - MCP_CLOUDFLARE_WORKERS_URL=https://your-worker.workers.dev
+      - MCP_WORKER_API_TOKEN=your-api-token
+      
+      # n8n基础配置
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://localhost:5678/
+      
+      # 可选：禁用遥测
+      - N8N_DIAGNOSTICS_ENABLED=false
+      
+    volumes:
+      - ~/.n8n:/home/node/.n8n
+      # 挂载MCP服务器代码
+      - ./dist:/opt/mcp/n8n-image-generator/dist:ro
+    depends_on:
+      - postgres
+    networks:
+      - n8n-network
+
+  postgres:
+    image: postgres:15
+    restart: always
+    environment:
+      - POSTGRES_USER=n8n
+      - POSTGRES_PASSWORD=n8n_password
+      - POSTGRES_DB=n8n
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - n8n-network
+
+  # 可选：作为独立SSE服务器运行
+  mcp-sse-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.sse
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - CLOUDFLARE_WORKERS_URL=https://your-worker.workers.dev
+      - WORKER_API_TOKEN=your-api-token
+      - PORT=3000
+    networks:
+      - n8n-network
+
+volumes:
+  postgres_data:
+
+networks:
+  n8n-network:
+    driver: bridge
+
+# 使用说明:
+# 1. 复制此文件到您的项目根目录
+# 2. 更新环境变量中的 CLOUDFLARE_WORKERS_URL 和 WORKER_API_TOKEN
+# 3. 运行: docker-compose up -d
+# 4. 访问 http://localhost:5678 使用 n8n
+# 5. 安装社区节点: npm install -g n8n-nodes-mcp
+# 6. 在工作流中使用 MCP Client Tool 节点 

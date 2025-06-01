@@ -1,0 +1,125 @@
+{
+  "name": "AI图像生成工作流 - MCP版本",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "4c40d8c0-09d8-47d8-88ee-1c5c8b9c6d9f",
+      "name": "手动触发",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [820, 300]
+    },
+    {
+      "parameters": {
+        "connectionType": "command",
+        "command": "node",
+        "arguments": "/path/to/mcps/n8n-image-generator/dist/index.js",
+        "environmentVariables": {
+          "CLOUDFLARE_WORKERS_URL": "https://your-worker.workers.dev",
+          "WORKER_API_TOKEN": "your-api-token"
+        },
+        "tool": "generate_image",
+        "toolParameters": {
+          "prompt": "={{ $json.prompt || '一只可爱的猫咪坐在彩虹色的云朵上，数字艺术风格' }}",
+          "model": "black-forest-labs/flux-schnell"
+        }
+      },
+      "id": "2f7b8e5c-1a4d-4c8e-9f3a-8b2c7d5e4f9a",
+      "name": "MCP图像生成",
+      "type": "n8n-nodes-mcp.mcpClient",
+      "typeVersion": 1,
+      "position": [1040, 300]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "生成状态",
+              "value": "={{ $json.status }}"
+            },
+            {
+              "name": "图像URL",
+              "value": "={{ $json.imageUrl }}"
+            },
+            {
+              "name": "预测ID",
+              "value": "={{ $json.predictionId }}"
+            },
+            {
+              "name": "提示词",
+              "value": "={{ $json.prompt }}"
+            },
+            {
+              "name": "生成时间",
+              "value": "={{ new Date().toISOString() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "1c9e7a3b-5d8f-4b2a-9e1c-7f4b6d9a2e5c",
+      "name": "格式化结果",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [1260, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "id": "8f3d5b7a-2e6c-4a9f-8b1d-5c7e9a3f6b2d",
+      "name": "响应结果",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1480, 300]
+    }
+  ],
+  "connections": {
+    "手动触发": {
+      "main": [
+        [
+          {
+            "node": "MCP图像生成",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP图像生成": {
+      "main": [
+        [
+          {
+            "node": "格式化结果",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "格式化结果": {
+      "main": [
+        [
+          {
+            "node": "响应结果",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "meta": {
+    "description": "使用MCP协议生成AI图像的示例工作流。支持自定义提示词和多种AI模型。",
+    "tags": ["AI", "图像生成", "MCP", "Replicate", "Cloudflare"]
+  },
+  "id": "ai-image-generation-mcp",
+  "staticData": null
+} 
