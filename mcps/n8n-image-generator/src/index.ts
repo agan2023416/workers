@@ -139,7 +139,7 @@ class N8nImageMCPServer {
       ...(version && { version }),
       // 为n8n生成webhook URL（如果需要）
       webhook: `${WORKER_URL}/webhook`,
-      webhookEvents: ["completed", "failed"]
+      webhookEvents: ["completed", "output"]
     };
 
     try {

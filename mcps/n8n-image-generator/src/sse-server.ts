@@ -141,7 +141,7 @@ class N8nImageSSEServer {
       model,
       ...(version && { version }),
       webhook: `${WORKER_URL}/webhook`,
-      webhookEvents: ["completed", "failed"]
+      webhookEvents: ["completed", "output"]
     };
 
     try {
