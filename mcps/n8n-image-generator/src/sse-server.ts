@@ -171,12 +171,18 @@ class N8nImageSSEServer {
 
       console.log(`✅ 图像生成任务已创建 - ID: ${result.id}`);
 
-      // 返回格式化的结果
+      // 返回JSON格式的结果
       return {
         content: [
           {
             type: 'text',
-            text: this.formatGenerationResult(result, prompt, model)
+            text: JSON.stringify({
+              id: result.id,
+              imageUrl: result.imageUrl,
+              status: result.status,
+              model: model,
+              prompt: prompt
+            }, null, 2)
           }
         ]
       };
@@ -209,30 +215,7 @@ class N8nImageSSEServer {
     }
   }
 
-  private formatGenerationResult(result: ImageGenerationResponse, prompt: string, model: string): string {
-    return `🎨 **图像生成任务已启动**
 
-📋 **任务信息:**
-- **预测ID:** \`${result.id}\`
-- **状态:** ${this.getStatusEmoji(result.status)} ${result.status}
-- **模型:** ${model}
-- **提示词:** "${prompt}"
-
-🔗 **图像URL:** ${result.imageUrl}
-
-⏱️ **预计完成时间:** 10-60秒`;
-  }
-
-  private getStatusEmoji(status: string): string {
-    const statusEmojis: Record<string, string> = {
-      'starting': '🚀',
-      'processing': '⏳',
-      'succeeded': '✅',
-      'failed': '❌',
-      'canceled': '⏹️'
-    };
-    return statusEmojis[status] || '❓';
-  }
 
   private createHTTPServer() {
     this.httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
