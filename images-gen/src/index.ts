@@ -10,6 +10,7 @@ interface Env {
   REPLICATE_API_TOKEN?: string;
   FAL_KEY?: string;
   UNSPLASH_ACCESS_KEY?: string;
+  API_KEY?: string;
 }
 
 interface GenerateImageRequest {
@@ -61,6 +62,15 @@ function createErrorResponse(message: string, status = 400): Response {
   );
 }
 
+// Authentication function
+function authenticateRequest(request: Request, env: Env): boolean {
+  const authHeader = request.headers.get('Authorization');
+  if (!authHeader) return false;
+
+  const token = authHeader.replace('Bearer ', '');
+  return token === env.API_KEY;
+}
+
 /**
  * Simplified Worker for debugging
  */
@@ -88,6 +98,15 @@ export default {
       const path = url.pathname;
       console.log(`Routing to path: ${path}`);
 
+      // Skip authentication for health check only
+      if (path !== '/health') {
+        if (!authenticateRequest(request, env)) {
+          console.log('Authentication failed');
+          return createErrorResponse('Unauthorized - API key required', 401);
+        }
+        console.log('Authentication successful');
+      }
+
       switch (path) {
         case '/health':
           console.log('Handling health check');
@@ -99,6 +118,7 @@ export default {
               replicate: !!env.REPLICATE_API_TOKEN,
               fal: !!env.FAL_KEY,
               unsplash: !!env.UNSPLASH_ACCESS_KEY,
+              api: !!env.API_KEY,
             }
           });
 
