@@ -1,0 +1,46 @@
+{
+  "name": "images-gen-worker",
+  "version": "1.0.0",
+  "description": "Unified image generation worker for article publishing workflow",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "deploy:staging": "wrangler deploy --env staging",
+    "deploy:production": "wrangler deploy --env production",
+    "test": "vitest",
+    "test:coverage": "vitest --coverage",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint src --ext .ts,.tsx",
+    "lint:fix": "eslint src --ext .ts,.tsx --fix",
+    "format": "prettier --write src/**/*.{ts,tsx,json}",
+    "build": "tsc && esbuild src/index.ts --bundle --outfile=dist/worker.js --format=esm --platform=neutral --target=es2022"
+  },
+  "keywords": [
+    "cloudflare",
+    "worker",
+    "image-generation",
+    "ai",
+    "replicate",
+    "fal",
+    "unsplash"
+  ],
+  "author": "Your Team",
+  "license": "MIT",
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20231218.0",
+    "@types/node": "^20.10.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "@vitest/coverage-v8": "^1.0.0",
+    "esbuild": "^0.19.8",
+    "eslint": "^8.54.0",
+    "prettier": "^3.1.0",
+    "typescript": "^5.3.2",
+    "vitest": "^1.0.0",
+    "wrangler": "^4.23.0"
+  },
+  "dependencies": {
+    "uuid": "^9.0.1"
+  }
+}

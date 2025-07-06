@@ -1,0 +1,30 @@
+{
+  "providers": {
+    "replicate": {
+      "enabled": true,
+      "timeout": 180000,
+      "retries": 0,
+      "priority": 1
+    },
+    "fal": {
+      "enabled": true,
+      "timeout": 15000,
+      "retries": 2,
+      "priority": 2
+    },
+    "unsplash": {
+      "enabled": true,
+      "timeout": 5000,
+      "retries": 1,
+      "priority": 3
+    }
+  },
+  "r2": {
+    "pathPrefix": "ai",
+    "cacheControl": "public, max-age=31536000, immutable"
+  },
+  "defaults": {
+    "timeout": 30000,
+    "imageUrl": "https://via.placeholder.com/1024x768/4A90E2/FFFFFF?text=Default+Image"
+  }
+}

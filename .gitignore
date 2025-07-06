@@ -2,6 +2,11 @@ node_modules/
 dist/
 .env
 .dev.vars
+.env.local
+.env.development
+.env.production
+*.vars
+*.toml
 *.log
 .DS_Store
 .vscode/

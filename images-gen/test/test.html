@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>图片生成测试</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, select, textarea {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #f8f9fa;
+        }
+        .error {
+            background-color: #f8d7da;
+            border-color: #f5c6cb;
+            color: #721c24;
+        }
+        .success {
+            background-color: #d4edda;
+            border-color: #c3e6cb;
+            color: #155724;
+        }
+        img {
+            max-width: 100%;
+            height: auto;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Image Generation Test</h1>
+    
+    <form id="imageForm">
+        <div class="form-group">
+            <label for="prompt">Prompt:</label>
+            <textarea id="prompt" rows="3" placeholder="Enter your image prompt here...">beautiful sunset over mountains</textarea>
+        </div>
+        
+        <div class="form-group">
+            <label for="provider">Provider:</label>
+            <select id="provider">
+                <option value="">Auto (priority racing - Replicate → Fal → Unsplash)</option>
+                <option value="replicate">Replicate (AI generation - highest priority)</option>
+                <option value="fal">Fal (AI generation - second priority)</option>
+                <option value="unsplash">Unsplash (stock photos - fallback)</option>
+            </select>
+        </div>
+        
+        <div class="form-group">
+            <label for="articleId">Article ID (optional):</label>
+            <input type="text" id="articleId" placeholder="article-123">
+        </div>
+        
+        <button type="submit">Generate Image</button>
+    </form>
+    
+    <div id="result" class="result" style="display: none;"></div>
+    
+    <script>
+        document.getElementById('imageForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const prompt = document.getElementById('prompt').value;
+            const provider = document.getElementById('provider').value;
+            const articleId = document.getElementById('articleId').value;
+            const resultDiv = document.getElementById('result');
+            
+            if (!prompt.trim()) {
+                showResult('Please enter a prompt', 'error');
+                return;
+            }
+            
+            const requestBody = {
+                prompt: prompt.trim(),
+                ...(provider && provider !== 'auto' && { provider }),
+                ...(articleId && { articleId })
+            };
+            
+            showResult('Generating image...', 'info');
+            
+            try {
+                const response = await fetch('https://images-gen-worker-prod.agan2023416.workers.dev/images/generate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(requestBody)
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showResult(`
+                        <h3>Success!</h3>
+                        <p><strong>Provider:</strong> ${data.provider}</p>
+                        <p><strong>Time:</strong> ${data.elapsedMs}ms</p>
+                        <p><strong>URL:</strong> <a href="${data.url}" target="_blank">${data.url}</a></p>
+                        <img src="${data.url}" alt="Generated image" />
+                    `, 'success');
+                } else {
+                    showResult(`
+                        <h3>Error</h3>
+                        <p>${data.error || 'Unknown error occurred'}</p>
+                        <pre>${JSON.stringify(data, null, 2)}</pre>
+                    `, 'error');
+                }
+            } catch (error) {
+                showResult(`
+                    <h3>Network Error</h3>
+                    <p>${error.message}</p>
+                `, 'error');
+            }
+        });
+        
+        function showResult(content, type) {
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = content;
+            resultDiv.className = `result ${type}`;
+            resultDiv.style.display = 'block';
+        }
+        
+        // Test health endpoint on page load
+        window.addEventListener('load', async function() {
+            try {
+                const response = await fetch('https://images-gen-worker-prod.agan2023416.workers.dev/health');
+                const data = await response.json();
+                console.log('Health check:', data);
+            } catch (error) {
+                console.error('Health check failed:', error);
+            }
+        });
+    </script>
+</body>
+</html>
