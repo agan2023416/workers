@@ -141,6 +141,7 @@ export interface GenerateImageRequest {
   width?: number;
   height?: number;
   style?: string;
+  provider?: 'replicate' | 'fal' | 'unsplash';
 }
 
 export interface GenerateImageResponse {

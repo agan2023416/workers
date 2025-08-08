@@ -17,7 +17,7 @@ import { ErrorHandler, globalCircuitBreaker } from '@/utils/errorHandler';
  * Race providers with priority - higher priority providers get a head start
  */
 async function raceWithPriority(
-  availableProviders: Array<{ name: keyof any; config: any }>,
+  availableProviders: Array<{ name: keyof AppConfig['providers']; config: any }>,
   request: GenerateImageRequest,
   env: Env,
   errorHandler: ErrorHandler,
@@ -70,7 +70,7 @@ export async function generateImage(
 
   // Filter providers by circuit breaker status
   const availableProviders = enabledProviders.filter(({ name }) =>
-    globalCircuitBreaker.isProviderAvailable(name as any)
+    globalCircuitBreaker.isProviderAvailable(name)
   );
 
   if (availableProviders.length === 0) {
@@ -139,7 +139,7 @@ export async function generateImage(
 
       // Record failures in circuit breaker
       availableProviders.forEach(({ name }) => {
-        globalCircuitBreaker.recordFailure(name as any);
+        globalCircuitBreaker.recordFailure(name);
       });
 
       // Return fallback image instead of throwing
@@ -186,10 +186,10 @@ async function generateWithProvider(
 
     if (result.success) {
       // Record success
-      globalCircuitBreaker.recordSuccess(providerName as any);
+      globalCircuitBreaker.recordSuccess(providerName);
     } else {
       // Record failure
-      globalCircuitBreaker.recordFailure(providerName as any);
+      globalCircuitBreaker.recordFailure(providerName);
     }
 
     return {
@@ -205,7 +205,7 @@ async function generateWithProvider(
     // Handle error with error handler
     const errorResult = await errorHandler.handleProviderError(
       error instanceof Error ? error : new Error(String(error)),
-      providerName as any,
+      providerName,
       'generation'
     );
 

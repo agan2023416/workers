@@ -11,6 +11,7 @@ interface Env {
   FAL_KEY?: string;
   UNSPLASH_ACCESS_KEY?: string;
   API_KEY?: string;
+  R2_CUSTOM_DOMAIN?: string;
 }
 
 interface GenerateImageRequest {
@@ -129,19 +130,20 @@ export default {
           }
 
           try {
-            const body = await request.json() as { imageUrl: string; articleId: string };
+            const body = await request.json() as { imageUrl: string; articleId?: string };
 
-            if (!body.imageUrl || !body.articleId) {
-              return createErrorResponse('Missing imageUrl or articleId', 400);
+            if (!body.imageUrl) {
+              return createErrorResponse('Missing imageUrl', 400);
             }
 
-            await storeImageInR2(body.imageUrl, body.articleId, env);
+            const url = await storeImageInR2(body.imageUrl, body.articleId, env);
 
             return createSuccessResponse({
               status: 'r2-test-success',
               message: 'Image stored successfully in R2',
               articleId: body.articleId,
               imageUrl: body.imageUrl,
+              r2Url: url,
             });
           } catch (error) {
             return createErrorResponse(
@@ -197,21 +199,21 @@ export default {
             // Use the real image generation function
             const result = await generateImage(body, env);
 
-            // Optionally store in R2 if successful
-            if (result.success && body.articleId) {
+            // Store in R2 if generation succeeded (articleId optional)
+            if (result.success) {
               try {
                 const r2Url = await storeImageInR2(result.url, body.articleId, env);
-                console.log('Image stored in R2 for article:', body.articleId);
+                console.log('Image stored in R2', body.articleId ? `for article: ${body.articleId}` : '(no articleId)');
                 console.log('R2 URL:', r2Url);
 
                 // Update the result to use the R2 URL for client access
-                result.url = r2Url;
-                result.r2Stored = true;
+                (result as any).url = r2Url;
+                (result as any).r2Stored = true;
               } catch (r2Error) {
                 console.error('Failed to store in R2:', r2Error);
                 // Don't fail the request if R2 storage fails, but log it
-                result.r2Stored = false;
-                result.r2Error = r2Error instanceof Error ? r2Error.message : 'R2 storage failed';
+                (result as any).r2Stored = false;
+                (result as any).r2Error = r2Error instanceof Error ? r2Error.message : 'R2 storage failed';
               }
             }
 
@@ -633,8 +635,8 @@ async function generateWithReplicate(request: GenerateImageRequest, env: Env, st
 }
 
 // R2 Storage function
-async function storeImageInR2(imageUrl: string, articleId: string, env: Env): Promise<string> {
-  console.log('Storing image in R2:', imageUrl, 'for article:', articleId);
+async function storeImageInR2(imageUrl: string, articleId: string | undefined, env: Env): Promise<string> {
+  console.log('Storing image in R2:', imageUrl, articleId ? `for article: ${articleId}` : '(no articleId)');
 
   try {
     // Download the image
@@ -645,19 +647,40 @@ async function storeImageInR2(imageUrl: string, articleId: string, env: Env): Pr
 
     const imageBlob = await imageResponse.blob();
     const imageBuffer = await imageBlob.arrayBuffer();
+    const contentType = imageBlob.type || 'image/jpeg';
+
+    // Infer file extension from content type
+    const typeMap: Record<string, string> = {
+      'image/jpeg': 'jpg',
+      'image/jpg': 'jpg',
+      'image/png': 'png',
+      'image/webp': 'webp',
+      'image/gif': 'gif',
+      'image/svg+xml': 'svg',
+      'image/bmp': 'bmp',
+      'image/tiff': 'tiff',
+    };
+    const extension = typeMap[contentType.toLowerCase()] || 'jpg';
 
     // Generate a unique key for the image
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const key = `articles/${articleId}/images/${timestamp}.jpg`;
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const timestamp = now.toISOString().replace(/[:.]/g, '-');
+    const random = Math.random().toString(36).slice(2, 8);
+
+    const key = articleId
+      ? `articles/${articleId}/images/${timestamp}.${extension}`
+      : `ai/${year}/${month}/${timestamp}-${random}.${extension}`;
 
     // Store in R2
     await env.IMAGES_BUCKET.put(key, imageBuffer, {
       httpMetadata: {
-        contentType: imageBlob.type || 'image/jpeg',
-        cacheControl: 'public, max-age=31536000', // 1 year
+        contentType,
+        cacheControl: 'public, max-age=31536000, immutable', // 1 year, immutable
       },
       customMetadata: {
-        articleId: articleId,
+        ...(articleId ? { articleId } : {}),
         originalUrl: imageUrl,
         storedAt: new Date().toISOString(),
       },
@@ -670,17 +693,23 @@ async function storeImageInR2(imageUrl: string, articleId: string, env: Env): Pr
       key,
       originalUrl: imageUrl,
       storedAt: new Date().toISOString(),
-      contentType: imageBlob.type || 'image/jpeg',
+      contentType,
       size: imageBuffer.byteLength,
     };
 
-    await env.STATE_KV.put(`image:${articleId}:${timestamp}`, JSON.stringify(metadata));
+    const metaKey = articleId ? `image:${articleId}:${timestamp}` : `image:public:${timestamp}`;
+    await env.STATE_KV.put(metaKey, JSON.stringify(metadata));
     console.log('Image metadata stored in KV');
 
-    // Return the accessible URL for the stored image
-    const accessUrl = `https://images-gen-worker-prod.agan2023416.workers.dev/images/r2?key=${encodeURIComponent(key)}`;
-    console.log('Image accessible at:', accessUrl);
+    // Return the accessible CDN URL if custom domain configured; otherwise fallback to Worker proxy endpoint
+    if (env.R2_CUSTOM_DOMAIN) {
+      const cdnUrl = `https://${env.R2_CUSTOM_DOMAIN}/${key}`;
+      console.log('Image accessible at (CDN):', cdnUrl);
+      return cdnUrl;
+    }
 
+    const accessUrl = `https://images-gen-worker-prod.agan2023416.workers.dev/images/r2?key=${encodeURIComponent(key)}`;
+    console.log('Image accessible at (worker proxy):', accessUrl);
     return accessUrl;
 
   } catch (error) {

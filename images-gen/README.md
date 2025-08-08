@@ -6,7 +6,7 @@ A unified image generation worker for article publishing workflow, built on Clou
 
 - **Multi-Provider Support**: Integrates Replicate, Fal, and Unsplash with parallel racing
 - **Automatic Fallback**: Circuit breaker pattern with graceful degradation to default images
-- **R2 Storage**: All generated images are stored in Cloudflare R2 with CDN URLs
+- **R2 Storage**: Generated images are stored in Cloudflare R2 and returned as CDN URLs via your custom domain (when R2_CUSTOM_DOMAIN is set)
 - **Real-time Monitoring**: Built-in analytics and state tracking
 - **Hot Configuration**: Runtime configuration updates without redeployment
 - **High Availability**: 99.9% uptime with comprehensive error handling
@@ -46,27 +46,54 @@ pnpm wrangler kv:namespace create "CONFIG_KV"
 
 3. **Update wrangler.toml** with your namespace IDs
 
-4. **Set Secrets**:
+4. **Set Secrets & Vars**:
 ```bash
-# Required for full functionality
+# Required for providers (set those you use)
 pnpm wrangler secret put REPLICATE_API_TOKEN
 pnpm wrangler secret put FAL_KEY
 pnpm wrangler secret put UNSPLASH_ACCESS_KEY
 
-# Optional: Custom R2 domain
+# Required for API auth (images-gen entry uses Authorization: Bearer <API_KEY>)
+pnpm wrangler secret put API_KEY
+
+# Optional but recommended: R2 custom domain for static URLs (e.g. cdn.example.com)
 pnpm wrangler secret put R2_CUSTOM_DOMAIN
 ```
 
 ### Deployment
 
 ```bash
-# Development
+# Development (uses .dev.vars if present)
 pnpm run dev
 
-# Staging
-pnpm run deploy:staging
-
 # Production
+pnpm run deploy:production
+```
+
+### Frontend Integration
+
+- Minimal guide for frontend teams is available at: `docs/FRONTEND_API.md`
+
+#### Cloudflare Setup (R2 + Custom Domain)
+
+1. Create R2 buckets (prod + preview):
+```bash
+pnpm wrangler r2 bucket create images-gen-storage
+pnpm wrangler r2 bucket create images-gen-storage-preview
+```
+2. Create KV namespaces:
+```bash
+pnpm wrangler kv:namespace create "STATE_KV"
+pnpm wrangler kv:namespace create "CONFIG_KV"
+```
+3. Bind them in wrangler.toml (already prefilled in this repo; update IDs if needed).
+4. Set secrets/vars (see above): REPLICATE_API_TOKEN, API_KEY, R2_CUSTOM_DOMAIN, etc.
+5. Configure R2 Public Access with a Custom Domain:
+   - In Cloudflare Dashboard → R2 → Your Bucket → Settings → Public Access
+   - Add a Custom Domain (e.g. cdn.example.com) and point DNS CNAME to the R2 public endpoint
+   - After validation, use that domain in `R2_CUSTOM_DOMAIN`
+6. Deploy:
+```bash
 pnpm run deploy:production
 ```
 
@@ -76,7 +103,10 @@ pnpm run deploy:production
 
 **POST** `/images/generate`
 
-Generate an image from a text prompt with automatic provider selection and fallback.
+Generate an image from a text prompt with automatic provider selection and fallback. If generation succeeds, the image is automatically uploaded to R2 and a static CDN URL is returned. When `R2_CUSTOM_DOMAIN` is configured, the URL will look like `https://cdn.example.com/ai/YYYY/MM/....webp`. Otherwise it will fall back to the Worker proxy route.
+
+- articleId: optional. When provided, images are stored under `articles/{articleId}/...`; otherwise under `ai/YYYY/MM/...`.
+- provider: optional. One of `replicate`, `fal`, `unsplash`. Leave empty to auto-select by priority.
 
 #### Request Body
 
@@ -84,10 +114,7 @@ Generate an image from a text prompt with automatic provider selection and fallb
 {
   "prompt": "A beautiful sunset over mountains",
   "keyword": "landscape",
-  "articleId": "article-123",
-  "width": 1024,
-  "height": 768,
-  "style": "photorealistic"
+  "articleId": "article-123" // optional
 }
 ```
 
@@ -95,10 +122,11 @@ Generate an image from a text prompt with automatic provider selection and fallb
 
 ```json
 {
-  "url": "https://your-cdn.com/ai/2024/01/uuid.webp",
+  "url": "https://cdn.example.com/ai/2025/08/uuid.webp",
   "provider": "replicate",
   "elapsedMs": 2500,
-  "success": true
+  "success": true,
+  "r2Stored": true
 }
 ```
 

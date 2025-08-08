@@ -13,8 +13,8 @@ import { validateImageDimensions } from '@/utils/validation';
 const REPLICATE_API_BASE = 'https://api.replicate.com/v1';
 const DEFAULT_MODEL = 'stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b';
 
-// Webhook endpoint for receiving Replicate callbacks
-const WEBHOOK_ENDPOINT = '/api/replicate/webhook';
+// Webhook endpoint for receiving Replicate callbacks (unused in dev; kept for reference)
+// const WEBHOOK_ENDPOINT = '/api/replicate/webhook';
 
 /**
  * Generate image using Replicate API with webhook support
@@ -126,36 +126,7 @@ async function createPredictionWithWebhook(
 /**
  * Wait for webhook result with fallback to polling
  */
-async function waitForWebhookResult(
-  predictionId: string,
-  env: Env,
-  config: ProviderConfig
-): Promise<{ success: boolean; url?: string; error?: string }> {
-  const webhookCheckInterval = 2000; // Check every 2 seconds
-  const maxWebhookWait = Math.min(config.timeout, 60000); // Max 1 minute for webhook
-  const startTime = Date.now();
-
-  // First, try to get result from webhook (stored in KV)
-  while (Date.now() - startTime < maxWebhookWait) {
-    try {
-      const webhookResult = await env.STATE_KV.get(`replicate:${predictionId}`);
-      if (webhookResult) {
-        const result = JSON.parse(webhookResult);
-        // Clean up the KV entry
-        await env.STATE_KV.delete(`replicate:${predictionId}`);
-        return result;
-      }
-    } catch (error) {
-      console.error('Error checking webhook result:', error);
-    }
-
-    await new Promise(resolve => setTimeout(resolve, webhookCheckInterval));
-  }
-
-  // Fallback to polling if webhook didn't deliver result
-  console.log(`Webhook timeout for ${predictionId}, falling back to polling`);
-  return await pollPrediction(predictionId, env, config);
-}
+// waitForWebhookResult removed (unused in dev)
 
 /**
  * Poll prediction until completion (fallback method)

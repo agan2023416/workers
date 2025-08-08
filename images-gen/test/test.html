@@ -83,21 +83,30 @@
             <label for="articleId">Article ID (optional):</label>
             <input type="text" id="articleId" placeholder="article-123">
         </div>
-        
+
+        <div class="form-group">
+            <label for="apiKey">API Key (required):</label>
+            <input type="password" id="apiKey" placeholder="Your API key for Authorization header" required>
+        </div>
+
         <button type="submit">Generate Image</button>
     </form>
-    
+
     <div id="result" class="result" style="display: none;"></div>
-    
+
     <script>
+        // Optional: set your R2 custom domain here to also show the static URL (leave empty if unknown)
+        const R2_CUSTOM_DOMAIN = '';
+
         document.getElementById('imageForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
             const prompt = document.getElementById('prompt').value;
             const provider = document.getElementById('provider').value;
             const articleId = document.getElementById('articleId').value;
+            const apiKey = document.getElementById('apiKey').value;
             const resultDiv = document.getElementById('result');
-            
+
             if (!prompt.trim()) {
                 showResult('Please enter a prompt', 'error');
                 return;
@@ -116,19 +125,55 @@
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${apiKey.trim()}`
                     },
                     body: JSON.stringify(requestBody)
                 });
-                
+
                 const data = await response.json();
-                
+
                 if (response.ok) {
+                    // Prefer direct URL when it's already a public CDN link
+                    let imgHtml = '';
+                    let extraInfoHtml = '';
+
+                    const isWorkerProxy = typeof data.url === 'string' && data.url.includes('/images/r2?key=');
+
+                    if (isWorkerProxy) {
+                        // Fetch image with Authorization header and render via blob URL to avoid CORS/auth issues
+                        try {
+                            const imgResp = await fetch(data.url, {
+                                headers: { 'Authorization': `Bearer ${apiKey.trim()}` }
+                            });
+                            if (!imgResp.ok) throw new Error(`Image fetch failed: ${imgResp.status}`);
+                            const blob = await imgResp.blob();
+                            const objectUrl = URL.createObjectURL(blob);
+                            imgHtml = `<img src="${objectUrl}" alt="Generated image" />`;
+                        } catch (e2) {
+                            imgHtml = `<div class="error">Image preview failed: ${e2.message}</div>`;
+                        }
+
+                        // Try to also show a static CDN URL if user sets domain here
+                        try {
+                            const u = new URL(data.url);
+                            const key = u.searchParams.get('key');
+                            if (R2_CUSTOM_DOMAIN && key) {
+                                const staticUrl = `https://${R2_CUSTOM_DOMAIN}/${key}`;
+                                extraInfoHtml = `<p><strong>Static URL:</strong> <a href="${staticUrl}" target="_blank">${staticUrl}</a></p>`;
+                            }
+                        } catch {}
+                    } else {
+                        // Already a public CDN URL
+                        imgHtml = `<img src="${data.url}" alt="Generated image" />`;
+                    }
+
                     showResult(`
                         <h3>Success!</h3>
                         <p><strong>Provider:</strong> ${data.provider}</p>
                         <p><strong>Time:</strong> ${data.elapsedMs}ms</p>
-                        <p><strong>URL:</strong> <a href="${data.url}" target="_blank">${data.url}</a></p>
-                        <img src="${data.url}" alt="Generated image" />
+                        <p><strong>URL (API returned):</strong> <a href="${data.url}" target="_blank">${data.url}</a></p>
+                        ${extraInfoHtml}
+                        ${imgHtml}
                     `, 'success');
                 } else {
                     showResult(`

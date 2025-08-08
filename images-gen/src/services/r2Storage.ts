@@ -72,7 +72,7 @@ function generateCDNUrl(objectKey: string, config: AppConfig): string {
 
   // Try the standard R2 public URL format first
   // This requires the bucket to be configured for public access
-  const bucketName = 'images-gen-storage-preview'; // Use preview bucket for development
+  // const bucketName = 'images-gen-storage-preview'; // Example: preview bucket name (unused)
 
   // R2 public URLs use this format when public access is enabled:
   // https://{bucket-name}.{account-id}.r2.cloudflarestorage.com/{object-key}
@@ -183,8 +183,9 @@ export async function getStorageStats(env: Env): Promise<{
         if (!sizeByMonth[yearMonth]) {
           sizeByMonth[yearMonth] = { count: 0, size: 0 };
         }
-        sizeByMonth[yearMonth].count++;
-        sizeByMonth[yearMonth].size += obj.size;
+        const bucket = sizeByMonth[yearMonth]!;
+        bucket.count++;
+        bucket.size += obj.size;
       }
     });
     
