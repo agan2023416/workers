@@ -199,21 +199,48 @@ export default {
             // Use the real image generation function
             const result = await generateImage(body, env);
 
-            // Store in R2 if generation succeeded (articleId optional)
-            if (result.success) {
-              try {
-                const r2Url = await storeImageInR2(result.url, body.articleId, env);
-                console.log('Image stored in R2', body.articleId ? `for article: ${body.articleId}` : '(no articleId)');
-                console.log('R2 URL:', r2Url);
+            // Default debug fields
+            (result as any).r2Stored = false;
+            (result as any).r2Error = undefined;
 
-                // Update the result to use the R2 URL for client access
-                (result as any).url = r2Url;
-                (result as any).r2Stored = true;
-              } catch (r2Error) {
-                console.error('Failed to store in R2:', r2Error);
-                // Don't fail the request if R2 storage fails, but log it
-                (result as any).r2Stored = false;
-                (result as any).r2Error = r2Error instanceof Error ? r2Error.message : 'R2 storage failed';
+            // Attempt to store in R2 if generation succeeded (articleId optional)
+            if (result.success) {
+              const maxRetries = 2; // total attempts = 1 + retries = 3
+              let attempt = 0;
+              let lastError: any = null;
+              let r2Url: string | null = null;
+
+              while (attempt <= maxRetries) {
+                try {
+                  r2Url = await storeImageInR2(result.url, body.articleId, env);
+                  console.log('Image stored in R2', body.articleId ? `for article: ${body.articleId}` : '(no articleId)');
+                  console.log('R2 URL:', r2Url);
+                  (result as any).url = r2Url; // overwrite with permanent URL
+                  (result as any).r2Stored = true;
+                  (result as any).r2Error = undefined;
+                  break;
+                } catch (r2Error) {
+                  lastError = r2Error;
+                  (result as any).r2Stored = false;
+                  (result as any).r2Error = r2Error instanceof Error ? r2Error.message : 'R2 storage failed';
+                  console.error(`Failed to store in R2 (attempt ${attempt + 1}/${maxRetries + 1}):`, r2Error);
+
+                  // Simple backoff before retrying (except after last attempt)
+                  if (attempt < maxRetries) {
+                    const backoff = 300 * Math.pow(2, attempt); // 300ms, 600ms, 1200ms
+                    await new Promise((res) => setTimeout(res, backoff));
+                  }
+
+                  attempt++;
+                }
+              }
+
+              // If caller provided articleId, enforce permanent URL requirement
+              if (body.articleId && !(result as any).r2Stored) {
+                const message = `R2 upload failed for articleId=${body.articleId}: ${lastError instanceof Error ? lastError.message : (lastError || 'Unknown error')}`;
+                console.error(message);
+                // When articleId is provided, we do not return a temporary URL
+                return createErrorResponse(message, 502);
               }
             }
 
