@@ -12,6 +12,7 @@ interface Env {
   UNSPLASH_ACCESS_KEY?: string;
   API_KEY?: string;
   R2_CUSTOM_DOMAIN?: string;
+  WEBHOOK_SECRET?: string;
 }
 
 interface GenerateImageRequest {
@@ -19,6 +20,8 @@ interface GenerateImageRequest {
   provider?: string;
   articleId?: string;
 }
+
+const DEFAULT_FALLBACK_IMAGE = 'https://via.placeholder.com/1024x768/4A90E2/FFFFFF?text=Default+Image';
 
 interface GenerateImageResponse {
   url: string;
@@ -28,6 +31,7 @@ interface GenerateImageResponse {
   error?: string;
   r2Stored?: boolean;
   r2Error?: string;
+  taskId?: string;
 }
 
 // Inline response functions
@@ -42,6 +46,34 @@ function createSuccessResponse<T>(data: T, status = 200): Response {
       'Cache-Control': 'no-cache',
     },
   });
+}
+
+// Crypto helpers for webhook signature verification
+async function hmacSha256Hex(secret: string, payload: string): Promise<string> {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    enc.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(payload));
+  const bytes = new Uint8Array(sig);
+  let hex = '';
+  for (let i = 0; i < bytes.length; i++) {
+    hex += bytes[i].toString(16).padStart(2, '0');
+  }
+  return hex;
+}
+
+function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let result = 0;
+  for (let i = 0; i < a.length; i++) {
+    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return result === 0;
 }
 
 function createErrorResponse(message: string, status = 400): Response {
@@ -99,8 +131,13 @@ export default {
       const path = url.pathname;
       console.log(`Routing to path: ${path}`);
 
-      // Skip authentication for health check only
-      if (path !== '/health') {
+      // Authentication: allow public access for health check, R2 image read-only endpoint, webhook, and status query
+      const isPublicEndpoint =
+        path === '/health' ||
+        (path === '/images/r2' && request.method === 'GET') ||
+        (path === '/replicate/webhook' && request.method === 'POST') ||
+        ((path === '/images/result' || path === '/status') && request.method === 'GET');
+      if (!isPublicEndpoint) {
         if (!authenticateRequest(request, env)) {
           console.log('Authentication failed');
           return createErrorResponse('Unauthorized - API key required', 401);
@@ -136,7 +173,7 @@ export default {
               return createErrorResponse('Missing imageUrl', 400);
             }
 
-            const url = await storeImageInR2(body.imageUrl, body.articleId, env);
+            const url = await storeImageInR2(body.imageUrl, body.articleId, env, new URL(request.url).origin);
 
             return createSuccessResponse({
               status: 'r2-test-success',
@@ -186,6 +223,71 @@ export default {
             );
           }
 
+        case '/replicate/webhook':
+          // Replicate webhook callback (POST)
+          if (request.method !== 'POST') {
+            return createErrorResponse('Method Not Allowed', 405);
+          }
+          try {
+            const rawBody = await request.text();
+            const signature = request.headers.get('X-Replicate-Signature');
+            if (env.WEBHOOK_SECRET) {
+              if (!signature) {
+                return createErrorResponse('Missing signature', 401);
+              }
+              const computed = await hmacSha256Hex(env.WEBHOOK_SECRET, rawBody);
+              if (!safeEqual(signature, computed)) {
+                console.warn('Invalid webhook signature');
+                return createErrorResponse('Invalid signature', 401);
+              }
+            }
+
+            const payload = JSON.parse(rawBody);
+            // Basic validation
+            const predictionId = payload?.id || payload?.prediction?.id;
+            const status = payload?.status;
+            const output = payload?.output;
+            console.log('Webhook received:', { predictionId, status });
+
+            if (!predictionId) {
+              return createErrorResponse('Invalid webhook payload', 400);
+            }
+
+            // Load context from KV
+            const ctxRaw = await env.STATE_KV.get(`replicate:ctx:${predictionId}`);
+            if (!ctxRaw) {
+              console.warn('Context not found in KV for prediction:', predictionId);
+              // Still record status for visibility
+              await env.STATE_KV.put(`replicate:result:${predictionId}`,
+                JSON.stringify({ status, note: 'no-ctx' }), { expirationTtl: 60 * 60 });
+              return createSuccessResponse({ ok: true, message: 'No context found' });
+            }
+            const ctx = JSON.parse(ctxRaw) as { articleId?: string; baseUrl: string };
+
+            if (status === 'succeeded' && Array.isArray(output) && output.length > 0) {
+              const imageUrl = output[0];
+              try {
+                const r2Url = await storeImageInR2(imageUrl, ctx.articleId, env, ctx.baseUrl);
+                await env.STATE_KV.put(`replicate:result:${predictionId}`, JSON.stringify({ url: r2Url, status: 'succeeded' }), { expirationTtl: 60 * 60 });
+                console.log('Webhook stored image to R2:', r2Url);
+                return createSuccessResponse({ ok: true });
+              } catch (e) {
+                await env.STATE_KV.put(`replicate:result:${predictionId}`, JSON.stringify({ error: String(e), status: 'failed' }), { expirationTtl: 60 * 60 });
+                return createErrorResponse('Failed to store image to R2', 500);
+              }
+            } else if (status === 'failed' || status === 'canceled') {
+              await env.STATE_KV.put(`replicate:result:${predictionId}`, JSON.stringify({ status }), { expirationTtl: 60 * 60 });
+              return createSuccessResponse({ ok: true });
+            }
+
+            // If still processing, just acknowledge
+            await env.STATE_KV.put(`replicate:result:${predictionId}`, JSON.stringify({ status: status || 'processing' }), { expirationTtl: 60 * 60 });
+            return createSuccessResponse({ ok: true });
+          } catch (e) {
+            console.error('Webhook error:', e);
+            return createErrorResponse('Webhook handling failed', 500);
+          }
+
         case '/images/generate':
           console.log('Handling image generation request');
           if (request.method !== 'POST') {
@@ -197,7 +299,12 @@ export default {
             console.log('Request body:', body);
 
             // Use the real image generation function
-            const result = await generateImage(body, env);
+            const result = await generateImage(body, env, new URL(request.url).origin);
+
+            // If Replicate was chosen or defaulted but time budget is tight, return taskId for async completion
+            if (!result.success && (body.provider === 'replicate' || !body.provider)) {
+              // try to parse a pending taskId from result if provided later
+            }
 
             // Default debug fields
             (result as any).r2Stored = false;
@@ -212,7 +319,8 @@ export default {
 
               while (attempt <= maxRetries) {
                 try {
-                  r2Url = await storeImageInR2(result.url, body.articleId, env);
+                  const baseUrl = new URL(request.url).origin;
+                  r2Url = await storeImageInR2(result.url, body.articleId, env, baseUrl);
                   console.log('Image stored in R2', body.articleId ? `for article: ${body.articleId}` : '(no articleId)');
                   console.log('R2 URL:', r2Url);
                   (result as any).url = r2Url; // overwrite with permanent URL
@@ -235,14 +343,28 @@ export default {
                 }
               }
 
-              // If caller provided articleId, enforce permanent URL requirement
-              if (body.articleId && !(result as any).r2Stored) {
-                const message = `R2 upload failed for articleId=${body.articleId}: ${lastError instanceof Error ? lastError.message : (lastError || 'Unknown error')}`;
-                console.error(message);
-                // When articleId is provided, we do not return a temporary URL
-                return createErrorResponse(message, 502);
+              // If R2 upload failed, fall back to generating an Unsplash image and upload that to R2
+              if (!(result as any).r2Stored) {
+                try {
+                  console.warn('Primary R2 upload failed; falling back to Unsplash image and re-uploading to R2');
+                  const unsplash = await generateWithUnsplash(body, env, Date.now());
+                  if (!unsplash.success || !unsplash.url) {
+                    throw new Error(unsplash.error || 'Unsplash fallback generation failed');
+                  }
+                  const baseUrl = new URL(request.url).origin;
+                  const fallbackR2Url = await storeImageInR2(unsplash.url, body.articleId, env, baseUrl);
+                  (result as any).url = fallbackR2Url;
+                  (result as any).provider = unsplash.provider;
+                  (result as any).r2Stored = true;
+                  (result as any).r2Error = undefined;
+                } catch (fallbackErr) {
+                  const message = `R2 upload failed and Unsplash fallback upload also failed: ${fallbackErr instanceof Error ? fallbackErr.message : 'Unknown error'}`;
+                  console.error(message);
+                  return createErrorResponse(message, 502);
+                }
               }
             }
+
 
             console.log('Returning response:', result);
             return createSuccessResponse(result);
@@ -293,6 +415,44 @@ export default {
             );
           }
 
+        case '/images/result':
+          // Public status/result endpoint for async tasks
+          if (request.method !== 'GET') {
+            return createErrorResponse('Method Not Allowed', 405);
+          }
+          try {
+            const urlObj = new URL(request.url);
+            const taskId = urlObj.searchParams.get('taskId');
+            if (!taskId) return createErrorResponse('Missing taskId', 400);
+
+            const resultRaw = await env.STATE_KV.get(`replicate:result:${taskId}`);
+            if (!resultRaw) {
+              return createSuccessResponse({ status: 'pending' });
+            }
+            const result = JSON.parse(resultRaw);
+            return createSuccessResponse(result);
+          } catch (e) {
+            console.error('Error in /images/result:', e);
+            return createErrorResponse('Failed to fetch result', 500);
+          }
+
+        case '/status':
+          // Simple alias to query by taskId; supports provider expansion later
+          if (request.method !== 'GET') {
+            return createErrorResponse('Method Not Allowed', 405);
+          }
+          try {
+            const urlObj = new URL(request.url);
+            const taskId = urlObj.searchParams.get('taskId');
+            if (!taskId) return createErrorResponse('Missing taskId', 400);
+            const resultRaw = await env.STATE_KV.get(`replicate:result:${taskId}`);
+            if (!resultRaw) return createSuccessResponse({ status: 'pending' });
+            return createSuccessResponse(JSON.parse(resultRaw));
+          } catch (e) {
+            console.error('Error in /status:', e);
+            return createErrorResponse('Failed to fetch status', 500);
+          }
+
         default:
           return createErrorResponse('Not Found', 404);
       }
@@ -308,7 +468,7 @@ export default {
 };
 
 // Image generation function with priority racing
-async function generateImage(request: GenerateImageRequest, env: Env) {
+async function generateImage(request: GenerateImageRequest, env: Env, baseUrl: string) {
   const startTime = Date.now();
 
   // If specific provider is requested, use it directly
@@ -317,7 +477,7 @@ async function generateImage(request: GenerateImageRequest, env: Env) {
 
     switch (request.provider) {
       case 'replicate':
-        return await generateWithReplicate(request, env, startTime);
+        return await generateWithReplicate(request, env, startTime, baseUrl);
       case 'fal':
         return await generateWithFal(request, env, startTime);
       case 'unsplash':
@@ -334,9 +494,9 @@ async function generateImage(request: GenerateImageRequest, env: Env) {
   try {
     console.log('Priority racing: Trying Replicate AI (90s timeout - MAXIMUM PRIORITY)...');
     const replicateResult = await Promise.race([
-      generateWithReplicate(request, env, startTime),
+      generateWithReplicate(request, env, startTime, baseUrl),
       new Promise<GenerateImageResponse>((_, reject) =>
-        setTimeout(() => reject(new Error('Replicate timeout after 90s')), 90000)
+        setTimeout(() => reject(new Error('Replicate timeout after 25s')), 25000)
       )
     ]);
 
@@ -358,7 +518,7 @@ async function generateImage(request: GenerateImageRequest, env: Env) {
     const falResult = await Promise.race([
       generateWithFal(request, env, startTime),
       new Promise<GenerateImageResponse>((_, reject) =>
-        setTimeout(() => reject(new Error('Fal timeout after 30s')), 30000)
+        setTimeout(() => reject(new Error('Fal timeout after 12s')), 12000)
       )
     ]);
 
@@ -441,8 +601,13 @@ async function generateWithUnsplash(request: GenerateImageRequest, env: Env, sta
     const randomIndex = Math.floor(Math.random() * data.results.length);
     const selectedImage = data.results[randomIndex];
 
-    // Use the regular size with proper parameters
-    const imageUrl = `${selectedImage.urls.regular}?w=1024&h=768&fit=crop&auto=format`;
+    // Use the regular size with proper parameters (preserve existing query params)
+    const u = new URL(selectedImage.urls.regular);
+    u.searchParams.set('w', '1024');
+    u.searchParams.set('h', '768');
+    u.searchParams.set('fit', 'crop');
+    u.searchParams.set('auto', 'format');
+    const imageUrl = u.toString();
 
     console.log('Selected Unsplash image:', imageUrl);
 
@@ -543,7 +708,7 @@ async function generateWithFal(request: GenerateImageRequest, env: Env, startTim
 }
 
 // Replicate provider (real API call)
-async function generateWithReplicate(request: GenerateImageRequest, env: Env, startTime: number) {
+async function generateWithReplicate(request: GenerateImageRequest, env: Env, startTime: number, baseUrl?: string) {
   console.log('Generating with Replicate AI');
   console.log('REPLICATE_API_TOKEN available:', !!env.REPLICATE_API_TOKEN);
 
@@ -578,6 +743,8 @@ async function generateWithReplicate(request: GenerateImageRequest, env: Env, st
       body: JSON.stringify({
         version: "c846a69991daf4c0e5d016514849d14ee5b2e6846ce6b9d6f21369e564cfe51e",
         input: input,
+        webhook: `${baseUrl ?? ''}/replicate/webhook`,
+        webhook_events_filter: ["completed"],
       }),
     });
 
@@ -596,10 +763,21 @@ async function generateWithReplicate(request: GenerateImageRequest, env: Env, st
     const prediction = await response.json() as any;
     console.log('Replicate prediction created:', prediction.id);
 
-    // Wait for the prediction to complete (maximum time for best quality)
+    // Store context for webhook consumption
+    try {
+      await env.STATE_KV.put(
+        `replicate:ctx:${prediction.id}`,
+        JSON.stringify({ articleId: request.articleId, baseUrl: baseUrl ?? '' }),
+        { expirationTtl: 24 * 60 * 60 }
+      );
+    } catch (e) {
+      console.warn('Failed to write replicate:ctx to KV:', e);
+    }
+
+    // Wait for the prediction to complete within our time budget
     let finalPrediction = prediction;
-    const maxWaitTime = 85000; // 85 seconds (留5秒给外层90秒超时)
-    const pollInterval = 3000; // 3 seconds (减少API调用频率)
+    const maxWaitTime = 22000; // <= 外层 25s 预算内
+    const pollInterval = 2000; // 2s
     const maxPolls = Math.floor(maxWaitTime / pollInterval);
 
     for (let i = 0; i < maxPolls; i++) {
@@ -628,7 +806,15 @@ async function generateWithReplicate(request: GenerateImageRequest, env: Env, st
     }
 
     if (finalPrediction.status !== 'succeeded') {
-      throw new Error(`Replicate prediction timed out or failed: ${finalPrediction.status}`);
+      // Timed out within our budget - return taskId for async completion
+      return {
+        url: `${baseUrl ?? ''}/images/result?taskId=${prediction.id}`,
+        provider: 'replicate',
+        elapsedMs: Date.now() - startTime,
+        success: false,
+        error: `Prediction pending: ${finalPrediction.status}`,
+        taskId: prediction.id,
+      } as GenerateImageResponse;
     }
 
     if (!finalPrediction.output || finalPrediction.output.length === 0) {
@@ -646,7 +832,8 @@ async function generateWithReplicate(request: GenerateImageRequest, env: Env, st
       elapsedMs: Date.now() - startTime,
       success: true,
       error: undefined,
-    };
+      taskId: prediction.id,
+    } as GenerateImageResponse;
   } catch (error) {
     console.error('Replicate generation failed:', error);
 
@@ -657,12 +844,12 @@ async function generateWithReplicate(request: GenerateImageRequest, env: Env, st
       elapsedMs: Date.now() - startTime,
       success: false,
       error: error instanceof Error ? error.message : 'Replicate failed',
-    };
+    } as GenerateImageResponse;
   }
 }
 
 // R2 Storage function
-async function storeImageInR2(imageUrl: string, articleId: string | undefined, env: Env): Promise<string> {
+async function storeImageInR2(imageUrl: string, articleId: string | undefined, env: Env, baseUrl: string): Promise<string> {
   console.log('Storing image in R2:', imageUrl, articleId ? `for article: ${articleId}` : '(no articleId)');
 
   try {
@@ -735,7 +922,8 @@ async function storeImageInR2(imageUrl: string, articleId: string | undefined, e
       return cdnUrl;
     }
 
-    const accessUrl = `https://images-gen-worker-prod.agan2023416.workers.dev/images/r2?key=${encodeURIComponent(key)}`;
+    // Fallback to current request origin for proxy URL
+    const accessUrl = `${baseUrl}/images/r2?key=${encodeURIComponent(key)}`;
     console.log('Image accessible at (worker proxy):', accessUrl);
     return accessUrl;
 
