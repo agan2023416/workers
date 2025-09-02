@@ -1,4 +1,4 @@
-// No imports for now - inline everything
+// No imports for now - inline everything (including unified processor)
 
 // Define types inline to avoid import issues
 interface Env {
@@ -16,7 +16,10 @@ interface Env {
 }
 
 interface GenerateImageRequest {
-  prompt: string;
+  // 新增：原文图片URL（可选）
+  imageUrl?: string;
+  // 原有：AI生成提示词（当imageUrl无效时必需）
+  prompt?: string;
   provider?: string;
   articleId?: string;
 }
@@ -289,7 +292,7 @@ export default {
           }
 
         case '/images/generate':
-          console.log('Handling image generation request');
+          console.log('Handling unified image generation request');
           if (request.method !== 'POST') {
             return createErrorResponse('Method Not Allowed', 405);
           }
@@ -298,7 +301,42 @@ export default {
             const body = await request.json() as GenerateImageRequest;
             console.log('Request body:', body);
 
-            // Use the real image generation function
+            // 检查是否使用新的统一处理逻辑
+            const useUnifiedProcessor = body.imageUrl ||
+              (body.prompt && body.imageUrl === undefined); // 明确支持新接口
+
+            if (useUnifiedProcessor) {
+              console.log('Using unified image processor');
+
+              // 使用新的统一图片处理服务
+              const unifiedResult = await processUnifiedImageRequest(
+                body,
+                env,
+                getDefaultConfig(),
+                new URL(request.url).origin
+              );
+
+              // 转换为兼容的响应格式
+              const compatibleResult = {
+                url: unifiedResult.url,
+                provider: mapSourceToProvider(unifiedResult.source),
+                elapsedMs: unifiedResult.elapsedMs,
+                success: unifiedResult.success,
+                error: unifiedResult.error,
+                r2Stored: unifiedResult.r2Stored,
+                r2Error: unifiedResult.details?.r2StorageError,
+                // 新增字段
+                source: unifiedResult.source,
+                originalUrl: unifiedResult.originalUrl,
+                usedPrompt: unifiedResult.usedPrompt
+              };
+
+              console.log('Unified processing result:', compatibleResult);
+              return createSuccessResponse(compatibleResult);
+            }
+
+            // 保持原有逻辑用于向后兼容
+            console.log('Using legacy image generation logic');
             const result = await generateImage(body, env, new URL(request.url).origin);
 
             // If Replicate was chosen or defaulted but time budget is tight, return taskId for async completion
@@ -930,5 +968,669 @@ async function storeImageInR2(imageUrl: string, articleId: string | undefined, e
   } catch (error) {
     console.error('Error storing image in R2:', error);
     throw error;
+  }
+}
+
+// 辅助函数：获取默认配置
+function getDefaultConfig() {
+  return {
+    providers: {
+      replicate: {
+        enabled: true,
+        timeout: 180000,
+        retries: 0,
+        priority: 1
+      },
+      fal: {
+        enabled: true,
+        timeout: 15000,
+        retries: 2,
+        priority: 2
+      },
+      unsplash: {
+        enabled: true,
+        timeout: 5000,
+        retries: 1,
+        priority: 3
+      }
+    },
+    r2: {
+      pathPrefix: 'ai',
+      cacheControl: 'public, max-age=31536000, immutable'
+    },
+    defaults: {
+      timeout: 30000,
+      imageUrl: DEFAULT_FALLBACK_IMAGE
+    },
+    urlValidation: {
+      timeout: 10000,
+      maxFileSize: 10 * 1024 * 1024,
+      allowedTypes: [
+        'image/jpeg', 'image/jpg', 'image/png', 'image/webp',
+        'image/gif', 'image/svg+xml', 'image/bmp', 'image/tiff'
+      ],
+      userAgent: 'CloudflareWorker-ImageProcessor/1.0',
+      maxRedirects: 5,
+      followRedirects: true
+    },
+    imageDownload: {
+      timeout: 15000,
+      retries: 2,
+      retryDelay: 1000
+    }
+  };
+}
+
+// 辅助函数：将source映射到provider（向后兼容）
+function mapSourceToProvider(source: string): string {
+  switch (source) {
+    case 'original':
+      return 'original';
+    case 'replicate':
+      return 'replicate';
+    case 'fal':
+      return 'fal';
+    case 'unsplash':
+      return 'unsplash';
+    case 'emergency-fallback':
+      return 'default';
+    default:
+      return 'default';
+  }
+}
+
+// 统一图片处理函数（增强版本）
+async function processUnifiedImageRequest(
+  request: GenerateImageRequest,
+  env: Env,
+  config: any,
+  baseUrl: string
+): Promise<any> {
+  const requestId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const logger = new UnifiedImageLogger(env, requestId);
+
+  logger.logStep('request_received', 'success', {
+    imageUrl: request.imageUrl ? '[PROVIDED]' : '[NOT_PROVIDED]',
+    prompt: request.prompt ? '[PROVIDED]' : '[NOT_PROVIDED]',
+    articleId: request.articleId,
+    provider: request.provider
+  });
+
+  try {
+    // 参数验证
+    logger.logStep('parameter_validation', 'success', null, 'Starting parameter validation');
+
+    if (!request.imageUrl && !request.prompt) {
+      const error = UnifiedImageError.configurationError(
+        'Either imageUrl or prompt must be provided',
+        { imageUrl: !!request.imageUrl, prompt: !!request.prompt }
+      );
+      logger.logStep('parameter_validation', 'failure', error.details, error.message);
+      throw error;
+    }
+
+    if (request.imageUrl) {
+      try {
+        new URL(request.imageUrl);
+        logger.logStep('parameter_validation', 'success', { imageUrl: 'valid_format' });
+      } catch {
+        const error = UnifiedImageError.urlValidationError(
+          'Invalid imageUrl format',
+          { imageUrl: request.imageUrl }
+        );
+        logger.logStep('parameter_validation', 'failure', error.details, error.message);
+        throw error;
+      }
+    }
+
+    if (request.prompt && request.prompt.trim().length === 0) {
+      const error = UnifiedImageError.configurationError(
+        'Prompt cannot be empty',
+        { prompt: request.prompt }
+      );
+      logger.logStep('parameter_validation', 'failure', error.details, error.message);
+      throw error;
+    }
+
+    logger.logStep('parameter_validation', 'success', null, 'All parameters validated successfully');
+
+    let result: any;
+
+    // 处理流程：优先尝试原文URL，失败后降级到AI生成
+    if (request.imageUrl) {
+      logger.logStep('processing_strategy', 'success', null, 'Using original URL processing with AI fallback');
+      result = await processOriginalImageWithLogging(request.imageUrl, env, logger);
+
+      // 如果原文URL失败且有prompt，尝试AI生成
+      if (!result.success && request.prompt) {
+        logger.logStep('fallback_decision', 'warning', null, 'Original URL failed, falling back to AI generation');
+        result = await processAIGenerationWithLogging(request, env, baseUrl, logger);
+      }
+    } else if (request.prompt) {
+      logger.logStep('processing_strategy', 'success', null, 'Using AI generation processing');
+      result = await processAIGenerationWithLogging(request, env, baseUrl, logger);
+    }
+
+    // 存储到R2
+    if (result.success && result.url) {
+      logger.logStep('r2_storage_attempt', 'success', null, 'Starting R2 storage');
+      try {
+        const r2Url = await storeImageInR2(result.url, request.articleId, env, baseUrl);
+        result.url = r2Url;
+        result.r2Stored = true;
+        logger.logStep('r2_storage', 'success', {
+          originalUrl: result.originalUrl || result.url,
+          r2Url: r2Url,
+          articleId: request.articleId
+        });
+      } catch (r2Error) {
+        const error = r2Error instanceof UnifiedImageError ? r2Error :
+          UnifiedImageError.r2StorageError(
+            r2Error instanceof Error ? r2Error.message : 'R2 storage failed',
+            { originalUrl: result.url, articleId: request.articleId }
+          );
+
+        logger.logStep('r2_storage', 'warning', error.details, error.message);
+        result.r2Stored = false;
+        result.r2Error = error.message;
+      }
+    } else {
+      logger.logStep('r2_storage_skip', 'warning', null, 'Skipping R2 storage due to processing failure');
+    }
+
+    // 构建最终结果
+    const finalResult = {
+      url: result.url || config.defaults.imageUrl,
+      source: result.source || 'emergency-fallback',
+      elapsedMs: logger.getTotalDuration(),
+      success: result.success || false,
+      r2Stored: result.r2Stored || false,
+      error: result.error,
+      originalUrl: result.originalUrl,
+      usedPrompt: result.usedPrompt,
+      details: result.details
+    };
+
+    logger.logStep('processing_complete', 'success', {
+      finalUrl: finalResult.url,
+      source: finalResult.source,
+      success: finalResult.success,
+      r2Stored: finalResult.r2Stored
+    });
+
+    // 保存处理日志
+    await logger.saveLog(finalResult);
+
+    return finalResult;
+
+  } catch (error) {
+    const unifiedError = error instanceof UnifiedImageError ? error :
+      new UnifiedImageError(
+        error instanceof Error ? error.message : 'Unknown error',
+        'PROCESSING_FAILED',
+        'general',
+        { originalError: error }
+      );
+
+    logger.logStep('processing_failed', 'failure', unifiedError.details, unifiedError.message);
+
+    const errorResult = {
+      url: config.defaults.imageUrl,
+      source: 'emergency-fallback',
+      elapsedMs: logger.getTotalDuration(),
+      success: false,
+      r2Stored: false,
+      error: unifiedError.message,
+      details: {
+        errorCode: unifiedError.code,
+        errorStep: unifiedError.step,
+        retryable: unifiedError.retryable,
+        ...unifiedError.details
+      }
+    };
+
+    // 保存错误日志
+    await logger.saveLog(errorResult);
+
+    return errorResult;
+  }
+}
+
+// 带日志记录的原文图片处理函数
+async function processOriginalImageWithLogging(imageUrl: string, env: Env, logger: UnifiedImageLogger): Promise<any> {
+  logger.logStep('url_validation_start', 'success', { imageUrl }, 'Starting URL validation and download');
+
+  try {
+    // 基础URL验证
+    logger.logStep('url_format_check', 'success', null, 'Checking URL format');
+    try {
+      const urlObj = new URL(imageUrl);
+      if (!['http:', 'https:'].includes(urlObj.protocol)) {
+        throw UnifiedImageError.urlValidationError(
+          `Invalid protocol: ${urlObj.protocol}. Only HTTP and HTTPS are supported.`,
+          { protocol: urlObj.protocol, hostname: urlObj.hostname }
+        );
+      }
+      logger.logStep('url_format_check', 'success', {
+        protocol: urlObj.protocol,
+        hostname: urlObj.hostname
+      });
+    } catch (urlError) {
+      const error = urlError instanceof UnifiedImageError ? urlError :
+        UnifiedImageError.urlValidationError(
+          `Invalid URL format: ${urlError instanceof Error ? urlError.message : 'Unknown error'}`,
+          { originalUrl: imageUrl }
+        );
+      logger.logStep('url_format_check', 'failure', error.details, error.message);
+      throw error;
+    }
+
+    // 尝试下载图片
+    logger.logStep('image_download_start', 'success', null, 'Starting image download');
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒超时
+
+    const response = await fetch(imageUrl, {
+      method: 'GET',
+      headers: {
+        'User-Agent': 'CloudflareWorker-ImageProcessor/1.0',
+        'Accept': 'image/*'
+      },
+      signal: controller.signal
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      throw UnifiedImageError.downloadError(
+        `HTTP ${response.status}: Failed to download image`,
+        {
+          status: response.status,
+          statusText: response.statusText,
+          url: imageUrl
+        }
+      );
+    }
+
+    logger.logStep('image_download', 'success', {
+      status: response.status,
+      finalUrl: response.url
+    });
+
+    // 验证Content-Type
+    logger.logStep('content_type_validation', 'success', null, 'Validating content type');
+    const contentType = response.headers.get('content-type');
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml', 'image/bmp'];
+
+    if (!contentType || !validTypes.some(type => contentType.includes(type))) {
+      throw UnifiedImageError.downloadError(
+        `Invalid content type: ${contentType}. Expected image type.`,
+        { contentType, validTypes }
+      );
+    }
+
+    logger.logStep('content_type_validation', 'success', { contentType });
+
+    // 验证文件大小
+    logger.logStep('file_size_validation', 'success', null, 'Validating file size');
+    const contentLength = response.headers.get('content-length');
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    if (contentLength && parseInt(contentLength) > maxSize) {
+      throw UnifiedImageError.downloadError(
+        `File too large: ${contentLength} bytes (max: ${maxSize})`,
+        { fileSize: parseInt(contentLength), maxSize }
+      );
+    }
+
+    logger.logStep('file_size_validation', 'success', {
+      contentLength: contentLength ? parseInt(contentLength) : 'unknown'
+    });
+
+    logger.logStep('original_image_processing', 'success', {
+      finalUrl: response.url,
+      contentType,
+      contentLength
+    }, 'Original image processed successfully');
+
+    return {
+      success: true,
+      source: 'original',
+      url: response.url || imageUrl,
+      originalUrl: imageUrl,
+      elapsedMs: logger.getTotalDuration()
+    };
+
+  } catch (error) {
+    const unifiedError = error instanceof UnifiedImageError ? error :
+      UnifiedImageError.downloadError(
+        error instanceof Error ? error.message : 'Unknown download error',
+        { originalUrl: imageUrl, originalError: error }
+      );
+
+    logger.logStep('original_image_processing', 'failure', unifiedError.details, unifiedError.message);
+
+    return {
+      success: false,
+      source: 'original',
+      url: '',
+      originalUrl: imageUrl,
+      elapsedMs: logger.getTotalDuration(),
+      error: unifiedError.message,
+      details: {
+        errorCode: unifiedError.code,
+        errorStep: unifiedError.step,
+        ...unifiedError.details
+      }
+    };
+  }
+}
+
+// 带日志记录的AI图片生成函数
+async function processAIGenerationWithLogging(
+  request: GenerateImageRequest,
+  env: Env,
+  baseUrl: string,
+  logger: UnifiedImageLogger
+): Promise<any> {
+  logger.logStep('ai_generation_start', 'success', {
+    prompt: request.prompt,
+    provider: request.provider
+  }, 'Starting AI generation');
+
+  try {
+
+    // 使用现有的AI生成逻辑（三级fallback）
+    let aiResult: any;
+
+    // 如果指定了特定提供商
+    if (request.provider) {
+      logger.logStep('provider_selection', 'success', {
+        selectedProvider: request.provider
+      }, `Using specified provider: ${request.provider}`);
+
+      switch (request.provider) {
+        case 'replicate':
+          logger.logStep('replicate_generation', 'success', null, 'Starting Replicate generation');
+          aiResult = await generateWithReplicate(request, env, Date.now(), baseUrl);
+          break;
+        case 'fal':
+          logger.logStep('fal_generation', 'success', null, 'Starting Fal generation');
+          aiResult = await generateWithFal(request, env, Date.now());
+          break;
+        case 'unsplash':
+          logger.logStep('unsplash_generation', 'success', null, 'Starting Unsplash generation');
+          aiResult = await generateWithUnsplash(request, env, Date.now());
+          break;
+        default:
+          logger.logStep('default_provider', 'warning', {
+            requestedProvider: request.provider
+          }, 'Unknown provider, falling back to Unsplash');
+          aiResult = await generateWithUnsplash(request, env, Date.now());
+      }
+
+      logger.logStep(`${request.provider}_result`, aiResult.success ? 'success' : 'failure', {
+        provider: aiResult.provider,
+        success: aiResult.success
+      }, aiResult.success ? 'Provider generation succeeded' : `Provider generation failed: ${aiResult.error}`);
+    } else {
+      // 三级fallback: Replicate → Fal → Unsplash
+      logger.logStep('fallback_strategy', 'success', null, 'Starting AI generation with fallback: Replicate → Fal → Unsplash');
+
+      // 1. 尝试Replicate
+      try {
+        logger.logStep('replicate_attempt', 'success', null, 'Trying Replicate AI (25s timeout)');
+        aiResult = await Promise.race([
+          generateWithReplicate(request, env, Date.now(), baseUrl),
+          new Promise<any>((_, reject) =>
+            setTimeout(() => reject(new Error('Replicate timeout')), 25000)
+          )
+        ]);
+
+        if (aiResult.success) {
+          logger.logStep('replicate_success', 'success', {
+            provider: aiResult.provider,
+            url: aiResult.url ? '[GENERATED]' : '[NO_URL]'
+          }, 'Replicate AI succeeded');
+        } else {
+          throw new Error(aiResult.error || 'Replicate failed');
+        }
+      } catch (error) {
+        logger.logStep('replicate_failure', 'warning', {
+          error: error instanceof Error ? error.message : 'Unknown error'
+        }, 'Replicate AI failed, trying next provider');
+
+        // 2. 尝试Fal
+        try {
+          logger.logStep('fal_attempt', 'success', null, 'Trying Fal AI (12s timeout)');
+          aiResult = await Promise.race([
+            generateWithFal(request, env, Date.now()),
+            new Promise<any>((_, reject) =>
+              setTimeout(() => reject(new Error('Fal timeout')), 12000)
+            )
+          ]);
+
+          if (aiResult.success) {
+            logger.logStep('fal_success', 'success', {
+              provider: aiResult.provider,
+              url: aiResult.url ? '[GENERATED]' : '[NO_URL]'
+            }, 'Fal AI succeeded');
+          } else {
+            throw new Error(aiResult.error || 'Fal failed');
+          }
+        } catch (falError) {
+          logger.logStep('fal_failure', 'warning', {
+            error: falError instanceof Error ? falError.message : 'Unknown error'
+          }, 'Fal AI failed, trying final fallback');
+
+          // 3. 最后尝试Unsplash
+          try {
+            logger.logStep('unsplash_attempt', 'success', null, 'Falling back to Unsplash (final attempt)');
+            aiResult = await generateWithUnsplash(request, env, Date.now());
+
+            if (aiResult.success) {
+              logger.logStep('unsplash_success', 'success', {
+                provider: aiResult.provider,
+                url: aiResult.url ? '[GENERATED]' : '[NO_URL]'
+              }, 'Unsplash fallback succeeded');
+            } else {
+              throw new Error(aiResult.error || 'Unsplash failed');
+            }
+          } catch (unsplashError) {
+            logger.logStep('all_providers_failed', 'failure', {
+              error: unsplashError instanceof Error ? unsplashError.message : 'Unknown error'
+            }, 'All AI providers failed');
+            aiResult = {
+              success: false,
+              provider: 'emergency-fallback',
+              error: 'All AI providers failed'
+            };
+          }
+        }
+      }
+    }
+
+    if (aiResult.success) {
+      logger.logStep('ai_generation_complete', 'success', {
+        finalProvider: aiResult.provider,
+        hasUrl: !!aiResult.url
+      }, 'AI generation completed successfully');
+
+      return {
+        success: true,
+        source: aiResult.provider,
+        url: aiResult.url,
+        usedPrompt: request.prompt,
+        elapsedMs: logger.getTotalDuration()
+      };
+    } else {
+      logger.logStep('ai_generation_complete', 'failure', {
+        finalProvider: aiResult.provider,
+        error: aiResult.error
+      }, 'AI generation failed completely');
+
+      return {
+        success: false,
+        source: 'emergency-fallback',
+        url: '',
+        usedPrompt: request.prompt,
+        elapsedMs: logger.getTotalDuration(),
+        error: aiResult.error,
+        details: {
+          aiGenerationError: aiResult.error,
+          finalProvider: aiResult.provider
+        }
+      };
+    }
+
+  } catch (error) {
+    const unifiedError = error instanceof UnifiedImageError ? error :
+      UnifiedImageError.aiGenerationError(
+        error instanceof Error ? error.message : 'Unknown AI generation error',
+        { prompt: request.prompt, provider: request.provider }
+      );
+
+    logger.logStep('ai_generation_exception', 'failure', unifiedError.details, unifiedError.message);
+
+    return {
+      success: false,
+      source: 'emergency-fallback',
+      url: '',
+      usedPrompt: request.prompt,
+      elapsedMs: logger.getTotalDuration(),
+      error: unifiedError.message,
+      details: {
+        errorCode: unifiedError.code,
+        errorStep: unifiedError.step,
+        ...unifiedError.details
+      }
+    };
+  }
+}
+
+// 增强的错误处理和日志记录功能
+class UnifiedImageLogger {
+  private env: Env;
+  private requestId: string;
+  private startTime: number;
+  private steps: Array<{
+    step: string;
+    status: 'success' | 'failure' | 'warning';
+    duration: number;
+    error?: string;
+    details?: any;
+  }> = [];
+
+  constructor(env: Env, requestId: string) {
+    this.env = env;
+    this.requestId = requestId;
+    this.startTime = Date.now();
+  }
+
+  logStep(step: string, status: 'success' | 'failure' | 'warning', details?: any, error?: string) {
+    const duration = Date.now() - this.startTime;
+    const stepInfo = {
+      step,
+      status,
+      duration,
+      error,
+      details
+    };
+
+    this.steps.push(stepInfo);
+
+    // 控制台日志
+    const logLevel = status === 'failure' ? 'error' : status === 'warning' ? 'warn' : 'log';
+    console[logLevel](`[${this.requestId}] ${step}: ${status}`, {
+      duration: `${duration}ms`,
+      error,
+      details
+    });
+  }
+
+  async saveLog(finalResult: any) {
+    try {
+      const logData = {
+        requestId: this.requestId,
+        timestamp: new Date().toISOString(),
+        totalDuration: Date.now() - this.startTime,
+        steps: this.steps,
+        finalResult,
+        success: finalResult.success
+      };
+
+      // 保存到KV存储
+      const logKey = `unified_log:${this.requestId}`;
+      await this.env.STATE_KV.put(logKey, JSON.stringify(logData), {
+        expirationTtl: 24 * 60 * 60 // 24小时过期
+      });
+
+      console.log(`[${this.requestId}] Processing log saved successfully`);
+    } catch (error) {
+      console.error(`[${this.requestId}] Failed to save processing log:`, error);
+      // 不抛出错误，避免影响主流程
+    }
+  }
+
+  getSteps() {
+    return this.steps;
+  }
+
+  getTotalDuration() {
+    return Date.now() - this.startTime;
+  }
+}
+
+// 增强的错误处理类
+class UnifiedImageError extends Error {
+  public readonly code: string;
+  public readonly step: string;
+  public readonly details?: any;
+  public readonly retryable: boolean;
+
+  constructor(
+    message: string,
+    code: string,
+    step: string,
+    details?: any,
+    retryable: boolean = false
+  ) {
+    super(message);
+    this.name = 'UnifiedImageError';
+    this.code = code;
+    this.step = step;
+    this.details = details;
+    this.retryable = retryable;
+  }
+
+  static urlValidationError(message: string, details?: any): UnifiedImageError {
+    return new UnifiedImageError(message, 'URL_VALIDATION_FAILED', 'url_validation', details, false);
+  }
+
+  static downloadError(message: string, details?: any): UnifiedImageError {
+    return new UnifiedImageError(message, 'DOWNLOAD_FAILED', 'url_download', details, true);
+  }
+
+  static aiGenerationError(message: string, details?: any): UnifiedImageError {
+    return new UnifiedImageError(message, 'AI_GENERATION_FAILED', 'ai_generation', details, true);
+  }
+
+  static r2StorageError(message: string, details?: any): UnifiedImageError {
+    return new UnifiedImageError(message, 'R2_STORAGE_FAILED', 'r2_storage', details, true);
+  }
+
+  static configurationError(message: string, details?: any): UnifiedImageError {
+    return new UnifiedImageError(message, 'CONFIGURATION_ERROR', 'configuration', details, false);
+  }
+
+  toJSON() {
+    return {
+      name: this.name,
+      message: this.message,
+      code: this.code,
+      step: this.step,
+      details: this.details,
+      retryable: this.retryable,
+      stack: this.stack
+    };
   }
 }

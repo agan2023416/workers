@@ -135,7 +135,13 @@ declare global {
 
 // Request/Response types
 export interface GenerateImageRequest {
-  prompt: string;
+  // 新增：原文图片URL（可选）
+  imageUrl?: string;
+
+  // 原有：AI生成提示词（当imageUrl无效时必需）
+  prompt?: string;
+
+  // 原有：可选参数
   keyword?: string;
   articleId?: string;
   width?: number;
@@ -144,6 +150,41 @@ export interface GenerateImageRequest {
   provider?: 'replicate' | 'fal' | 'unsplash';
 }
 
+// 统一响应接口
+export interface UnifiedImageResponse {
+  // 统一返回R2存储的URL
+  url: string;
+
+  // 图片来源标识
+  source: 'original' | 'replicate' | 'fal' | 'unsplash' | 'emergency-fallback';
+
+  // 处理时间
+  elapsedMs: number;
+
+  // 成功标识
+  success: boolean;
+
+  // R2存储状态
+  r2Stored?: boolean;
+
+  // 错误信息（失败时）
+  error?: string;
+
+  // 可选：原始URL（当source为'original'时）
+  originalUrl?: string;
+
+  // 可选：使用的提示词（当source为AI生成时）
+  usedPrompt?: string;
+
+  // 详细错误信息（失败时）
+  details?: {
+    originalUrlError?: string;
+    aiGenerationError?: string;
+    r2StorageError?: string;
+  };
+}
+
+// 保持向后兼容的原响应接口
 export interface GenerateImageResponse {
   url: string;
   provider: ImageProvider;
@@ -154,6 +195,7 @@ export interface GenerateImageResponse {
 
 // Provider types
 export type ImageProvider = 'replicate' | 'fal' | 'unsplash' | 'default';
+export type ImageSource = 'original' | 'replicate' | 'fal' | 'unsplash' | 'emergency-fallback';
 
 export interface ProviderResult {
   success: boolean;
@@ -185,6 +227,14 @@ export interface AppConfig {
   defaults: {
     timeout: number;
     imageUrl: string;
+  };
+  // 新增：URL验证配置
+  urlValidation?: UrlValidationConfig;
+  // 新增：图片下载配置
+  imageDownload?: {
+    timeout: number;
+    retries: number;
+    retryDelay: number;
   };
 }
 
@@ -250,6 +300,64 @@ export class TimeoutError extends Error {
     super(message);
     this.name = 'TimeoutError';
   }
+}
+
+// URL验证相关类型
+export interface UrlValidationResult {
+  isValid: boolean;
+  error?: string;
+  contentType?: string;
+  contentLength?: number;
+  finalUrl?: string; // After redirects
+}
+
+export interface UrlValidationConfig {
+  timeout: number;           // 验证超时时间 (ms)
+  maxFileSize: number;       // 最大文件大小 (bytes)
+  allowedTypes: string[];    // 允许的MIME类型
+  userAgent: string;         // 请求User-Agent
+  maxRedirects: number;      // 最大重定向次数
+  followRedirects: boolean;  // 是否跟随重定向
+}
+
+// 图片处理结果类型
+export interface ImageProcessingResult {
+  success: boolean;
+  source: ImageSource;
+  url: string;
+  originalUrl?: string;
+  usedPrompt?: string;
+  elapsedMs: number;
+  error?: string;
+  details?: {
+    urlValidation?: UrlValidationResult;
+    downloadError?: string;
+    aiGenerationError?: string;
+    r2StorageError?: string;
+  };
+}
+
+// 处理步骤日志类型
+export interface ProcessingStep {
+  step: 'url_validation' | 'url_download' | 'ai_generation' | 'r2_storage';
+  status: 'success' | 'failure';
+  duration: number;
+  error?: string;
+  details?: any;
+}
+
+export interface ProcessingLog {
+  requestId: string;
+  timestamp: string;
+  imageUrl?: string;
+  prompt?: string;
+  articleId?: string;
+  steps: ProcessingStep[];
+  finalResult: {
+    source: ImageSource;
+    url: string;
+    success: boolean;
+  };
 }
 
 // Utility types

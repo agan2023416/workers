@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>统一图片处理API测试页面</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .config-section {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+        }
+
+        .config-section h3 {
+            color: #333;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+        }
+
+        .config-section h3::before {
+            content: "⚙️";
+            margin-right: 10px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #555;
+        }
+
+        .form-group input, .form-group textarea, .form-group select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e1e5e9;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        .form-group input:focus, .form-group textarea:focus, .form-group select:focus {
+            outline: none;
+            border-color: #4facfe;
+        }
+
+        .test-scenarios {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .test-card {
+            background: white;
+            border: 2px solid #e1e5e9;
+            border-radius: 8px;
+            padding: 20px;
+            transition: all 0.3s;
+        }
+
+        .test-card:hover {
+            border-color: #4facfe;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+        }
+
+        .test-card h4 {
+            color: #333;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+        }
+
+        .test-card p {
+            color: #666;
+            margin-bottom: 15px;
+            line-height: 1.5;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s;
+            width: 100%;
+        }
+
+        .btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(79, 172, 254, 0.4);
+        }
+
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .results {
+            margin-top: 30px;
+        }
+
+        .result-item {
+            background: #f8f9fa;
+            border-left: 4px solid #4facfe;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .result-item.success {
+            border-left-color: #28a745;
+            background: #f8fff9;
+        }
+
+        .result-item.error {
+            border-left-color: #dc3545;
+            background: #fff8f8;
+        }
+
+        .result-header {
+            display: flex;
+            justify-content: between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .result-title {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .result-time {
+            color: #666;
+            font-size: 12px;
+        }
+
+        .result-content {
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            border: 1px solid #e1e5e9;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 12px;
+            overflow-x: auto;
+        }
+
+        .result-image {
+            margin-top: 15px;
+            text-align: center;
+        }
+
+        .result-image img {
+            max-width: 100%;
+            max-height: 300px;
+            border-radius: 6px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #4facfe;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .status-success { background: #28a745; }
+        .status-error { background: #dc3545; }
+        .status-warning { background: #ffc107; }
+
+        .clear-btn {
+            background: #6c757d;
+            margin-left: 10px;
+        }
+
+        .clear-btn:hover {
+            background: #5a6268;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🖼️ 统一图片处理API测试</h1>
+            <p>测试原文URL下载、AI生成备选和向后兼容性</p>
+        </div>
+
+        <div class="content">
+            <!-- 配置区域 -->
+            <div class="config-section">
+                <h3>API配置</h3>
+                <div class="form-group">
+                    <label for="workerUrl">Worker URL:</label>
+                    <input type="text" id="workerUrl" placeholder="https://images-gen-worker-prod.your-account.workers.dev" value="">
+                </div>
+                <div class="form-group">
+                    <label for="apiKey">API Key:</label>
+                    <input type="password" id="apiKey" placeholder="输入你的API密钥" value="">
+                </div>
+            </div>
+
+            <!-- 测试场景 -->
+            <div class="test-scenarios">
+                <div class="test-card">
+                    <h4>🎯 测试1: 原文URL成功</h4>
+                    <p>测试有效图片URL的处理，应该返回 source="original"</p>
+                    <div class="form-group">
+                        <input type="text" id="test1-url" placeholder="图片URL" value="https://picsum.photos/800/600.jpg">
+                    </div>
+                    <div class="form-group">
+                        <input type="text" id="test1-article" placeholder="文章ID" value="test-original-success">
+                    </div>
+                    <button class="btn" onclick="runTest1()">
+                        <span id="test1-loading" style="display: none;" class="loading"></span>
+                        运行测试
+                    </button>
+                </div>
+
+                <div class="test-card">
+                    <h4>🔄 测试2: URL失败→AI备选</h4>
+                    <p>测试无效URL自动降级到AI生成的功能</p>
+                    <div class="form-group">
+                        <input type="text" id="test2-url" placeholder="无效图片URL" value="https://nonexistent-domain-12345.com/missing.jpg">
+                    </div>
+                    <div class="form-group">
+                        <input type="text" id="test2-prompt" placeholder="AI提示词" value="A beautiful sunset over mountains">
+                    </div>
+                    <div class="form-group">
+                        <input type="text" id="test2-article" placeholder="文章ID" value="test-fallback">
+                    </div>
+                    <button class="btn" onclick="runTest2()">
+                        <span id="test2-loading" style="display: none;" class="loading"></span>
+                        运行测试
+                    </button>
+                </div>
+
+                <div class="test-card">
+                    <h4>🤖 测试3: 纯AI生成</h4>
+                    <p>测试向后兼容性，原有API调用方式</p>
+                    <div class="form-group">
+                        <input type="text" id="test3-prompt" placeholder="AI提示词" value="A futuristic cityscape at night">
+                    </div>
+                    <div class="form-group">
+                        <select id="test3-provider">
+                            <option value="">自动选择</option>
+                            <option value="replicate">Replicate</option>
+                            <option value="fal">Fal</option>
+                            <option value="unsplash">Unsplash</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <input type="text" id="test3-article" placeholder="文章ID" value="test-legacy">
+                    </div>
+                    <button class="btn" onclick="runTest3()">
+                        <span id="test3-loading" style="display: none;" class="loading"></span>
+                        运行测试
+                    </button>
+                </div>
+
+                <div class="test-card">
+                    <h4>📷 测试4: 仅原文URL</h4>
+                    <p>测试仅处理原文URL，无AI备选的情况</p>
+                    <div class="form-group">
+                        <input type="text" id="test4-url" placeholder="图片URL" value="https://picsum.photos/1024/768.jpg">
+                    </div>
+                    <div class="form-group">
+                        <input type="text" id="test4-article" placeholder="文章ID" value="test-original-only">
+                    </div>
+                    <button class="btn" onclick="runTest4()">
+                        <span id="test4-loading" style="display: none;" class="loading"></span>
+                        运行测试
+                    </button>
+                </div>
+            </div>
+
+            <!-- 批量测试 -->
+            <div style="text-align: center; margin-bottom: 30px;">
+                <button class="btn" onclick="runAllTests()" style="width: auto; margin-right: 10px;">
+                    <span id="all-loading" style="display: none;" class="loading"></span>
+                    🚀 运行所有测试
+                </button>
+                <button class="btn clear-btn" onclick="clearResults()" style="width: auto;">
+                    🗑️ 清空结果
+                </button>
+            </div>
+
+            <!-- 结果区域 -->
+            <div class="results">
+                <h3>📊 测试结果</h3>
+                <div id="results-container">
+                    <p style="color: #666; text-align: center; padding: 40px;">暂无测试结果，请运行测试...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 全局配置
+        let testResults = [];
+
+        // 获取配置
+        function getConfig() {
+            const workerUrl = document.getElementById('workerUrl').value.trim();
+            const apiKey = document.getElementById('apiKey').value.trim();
+            
+            if (!workerUrl || !apiKey) {
+                alert('请先配置Worker URL和API Key');
+                return null;
+            }
+            
+            return { workerUrl, apiKey };
+        }
+
+        // 通用API调用函数
+        async function callAPI(payload, testName) {
+            const config = getConfig();
+            if (!config) return null;
+
+            try {
+                const response = await fetch(`${config.workerUrl}/images/generate`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${config.apiKey}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+                
+                // 记录结果
+                const testResult = {
+                    testName,
+                    timestamp: new Date().toLocaleString(),
+                    payload,
+                    result,
+                    success: result.success,
+                    httpStatus: response.status
+                };
+                
+                testResults.unshift(testResult);
+                displayResult(testResult);
+                
+                return result;
+            } catch (error) {
+                const testResult = {
+                    testName,
+                    timestamp: new Date().toLocaleString(),
+                    payload,
+                    result: null,
+                    error: error.message,
+                    success: false,
+                    httpStatus: 0
+                };
+                
+                testResults.unshift(testResult);
+                displayResult(testResult);
+                
+                return null;
+            }
+        }
+
+        // 显示结果
+        function displayResult(testResult) {
+            const container = document.getElementById('results-container');
+            
+            // 如果是第一个结果，清空占位文本
+            if (container.children.length === 1 && container.children[0].tagName === 'P') {
+                container.innerHTML = '';
+            }
+
+            const resultDiv = document.createElement('div');
+            resultDiv.className = `result-item ${testResult.success ? 'success' : 'error'}`;
+            
+            const statusIcon = testResult.success ? 
+                '<span class="status-indicator status-success"></span>' : 
+                '<span class="status-indicator status-error"></span>';
+            
+            let resultContent = '';
+            if (testResult.result) {
+                resultContent = JSON.stringify(testResult.result, null, 2);
+            } else if (testResult.error) {
+                resultContent = `错误: ${testResult.error}`;
+            }
+
+            resultDiv.innerHTML = `
+                <div class="result-header">
+                    <div class="result-title">
+                        ${statusIcon}${testResult.testName}
+                    </div>
+                    <div class="result-time">${testResult.timestamp}</div>
+                </div>
+                <div class="result-content">${resultContent}</div>
+                ${testResult.result && testResult.result.url && testResult.result.success ? 
+                    `<div class="result-image">
+                        <img src="${testResult.result.url}" alt="Generated Image" onerror="this.style.display='none'">
+                    </div>` : ''
+                }
+            `;
+
+            container.insertBefore(resultDiv, container.firstChild);
+        }
+
+        // 设置加载状态
+        function setLoading(testId, loading) {
+            const loadingEl = document.getElementById(`${testId}-loading`);
+            const button = loadingEl.parentElement;
+            
+            if (loading) {
+                loadingEl.style.display = 'inline-block';
+                button.disabled = true;
+            } else {
+                loadingEl.style.display = 'none';
+                button.disabled = false;
+            }
+        }
+
+        // 测试1: 原文URL成功
+        async function runTest1() {
+            setLoading('test1', true);
+            
+            const payload = {
+                imageUrl: document.getElementById('test1-url').value,
+                articleId: document.getElementById('test1-article').value
+            };
+
+            await callAPI(payload, '🎯 测试1: 原文URL成功');
+            setLoading('test1', false);
+        }
+
+        // 测试2: URL失败→AI备选
+        async function runTest2() {
+            setLoading('test2', true);
+            
+            const payload = {
+                imageUrl: document.getElementById('test2-url').value,
+                prompt: document.getElementById('test2-prompt').value,
+                articleId: document.getElementById('test2-article').value
+            };
+
+            await callAPI(payload, '🔄 测试2: URL失败→AI备选');
+            setLoading('test2', false);
+        }
+
+        // 测试3: 纯AI生成
+        async function runTest3() {
+            setLoading('test3', true);
+            
+            const payload = {
+                prompt: document.getElementById('test3-prompt').value,
+                articleId: document.getElementById('test3-article').value
+            };
+
+            const provider = document.getElementById('test3-provider').value;
+            if (provider) {
+                payload.provider = provider;
+            }
+
+            await callAPI(payload, '🤖 测试3: 纯AI生成');
+            setLoading('test3', false);
+        }
+
+        // 测试4: 仅原文URL
+        async function runTest4() {
+            setLoading('test4', true);
+            
+            const payload = {
+                imageUrl: document.getElementById('test4-url').value,
+                articleId: document.getElementById('test4-article').value
+            };
+
+            await callAPI(payload, '📷 测试4: 仅原文URL');
+            setLoading('test4', false);
+        }
+
+        // 运行所有测试
+        async function runAllTests() {
+            setLoading('all', true);
+            
+            await runTest1();
+            await new Promise(resolve => setTimeout(resolve, 1000)); // 等待1秒
+            
+            await runTest2();
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            await runTest3();
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            await runTest4();
+            
+            setLoading('all', false);
+            alert('所有测试完成！请查看结果。');
+        }
+
+        // 清空结果
+        function clearResults() {
+            testResults = [];
+            document.getElementById('results-container').innerHTML = 
+                '<p style="color: #666; text-align: center; padding: 40px;">暂无测试结果，请运行测试...</p>';
+        }
+
+        // 页面加载时的初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            // 可以在这里设置默认的Worker URL
+            // document.getElementById('workerUrl').value = 'https://your-worker.workers.dev';
+        });
+    </script>
+</body>
+</html>
