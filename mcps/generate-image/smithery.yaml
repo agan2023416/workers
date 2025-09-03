@@ -1,0 +1,34 @@
+# Smithery configuration file: https://smithery.ai/docs/config#smitheryyaml
+
+build:
+  dockerBuildPath: ../..
+startCommand:
+  type: stdio
+  configSchema:
+    # JSON Schema defining the configuration options for the MCP.
+    type: object
+    required:
+      - workerApiToken
+      - cloudflareWorkersUrl
+    properties:
+      workerApiToken:
+        type: string
+        description: API token for authenticating with the Cloudflare Worker
+      cloudflareWorkersUrl:
+        type: string
+        description: URL of the Cloudflare Worker endpoint
+  commandFunction:
+    # A JS function that produces the CLI command based on the given config to start the MCP on stdio.
+    |-
+    (config) => ({
+      // Run the compiled MCP server from the dist folder (corrected path)
+      command: 'node',
+      args: ['dist/index.js'],
+      env: {
+        WORKER_API_TOKEN: config.workerApiToken,
+        CLOUDFLARE_WORKERS_URL: config.cloudflareWorkersUrl
+      }
+    })
+  exampleConfig:
+    workerApiToken: example_token_123
+    cloudflareWorkersUrl: https://example.cloudflareworkers.com
