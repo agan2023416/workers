@@ -29,6 +29,23 @@ export const DEFAULT_CONFIG: AppConfig = {
   defaults: {
     timeout: 30000, // 30 seconds total
     imageUrl: 'https://via.placeholder.com/1024x768/4A90E2/FFFFFF?text=Default+Image',
+    model: 'flux-1.1-pro' as const, // 默认使用flux 1.1 pro
+  },
+  models: {
+    replicate: {
+      'flux-1.1-pro': 'black-forest-labs/flux-1.1-pro',
+      'flux-1.1-dev': 'black-forest-labs/flux-dev',
+      'flux-schnell': 'black-forest-labs/flux-schnell',
+      'ideogram-turbo': 'ideogram-ai/ideogram-v3-turbo',
+      'ideogram-3.0': 'ideogram-ai/ideogram-v2'
+    },
+    fal: {
+      'flux-1.1-pro': 'fal-ai/flux-pro', // Fal只有FLUX.1 [pro]，没有1.1版本
+      'flux-1.1-dev': 'fal-ai/flux/dev',
+      'flux-schnell': 'fal-ai/flux/schnell',
+      'ideogram-turbo': 'fal-ai/ideogram/v2/turbo',
+      'ideogram-3.0': 'fal-ai/ideogram/v3'
+    }
   },
 };
 
@@ -97,6 +114,13 @@ function mergeConfig(base: AppConfig, override: Partial<AppConfig>): AppConfig {
     },
     r2: { ...base.r2, ...override.r2 },
     defaults: { ...base.defaults, ...override.defaults },
+    models: {
+      replicate: { ...base.models.replicate, ...override.models?.replicate },
+      fal: { ...base.models.fal, ...override.models?.fal },
+    },
+    // 可选字段
+    urlValidation: override.urlValidation || base.urlValidation,
+    imageDownload: override.imageDownload || base.imageDownload,
   };
 }
 

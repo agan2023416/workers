@@ -4,17 +4,27 @@ import {
   Env,
   ProviderConfig,
   ReplicateResponse,
-  ImageGenerationError
+  ImageGenerationError,
+  ImageModel,
+  AppConfig
 } from '@/types';
 import { createTimeout } from '@/utils/common';
 import { validateImageDimensions } from '@/utils/validation';
 
 // Replicate API endpoints
 const REPLICATE_API_BASE = 'https://api.replicate.com/v1';
-const DEFAULT_MODEL = 'stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b';
+const DEFAULT_MODEL = 'black-forest-labs/flux-1.1-pro'; // 更新为flux 1.1 pro
 
 // Webhook endpoint for receiving Replicate callbacks (unused in dev; kept for reference)
 // const WEBHOOK_ENDPOINT = '/api/replicate/webhook';
+
+/**
+ * Get Replicate model identifier based on selected model
+ */
+function getReplicateModel(model: ImageModel, config: AppConfig): string {
+  const replicateModels = config.models.replicate;
+  return replicateModels[model] || replicateModels['flux-1.1-pro'] || DEFAULT_MODEL;
+}
 
 /**
  * Generate image using Replicate API with webhook support
@@ -22,9 +32,18 @@ const DEFAULT_MODEL = 'stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfe
 export async function generateWithReplicate(
   request: GenerateImageRequest,
   env: Env,
-  config: ProviderConfig
+  config: ProviderConfig,
+  appConfig: AppConfig
 ): Promise<ProviderResult> {
+  console.log('generateWithReplicate called with:', {
+    prompt: request.prompt,
+    model: request.model,
+    provider: request.provider,
+    hasToken: !!env.REPLICATE_API_TOKEN
+  });
+
   if (!env.REPLICATE_API_TOKEN) {
+    console.error('Replicate API token not configured');
     throw new ImageGenerationError('Replicate API token not configured', 'replicate');
   }
 
@@ -32,7 +51,8 @@ export async function generateWithReplicate(
 
   try {
     // Create prediction (without webhook for development)
-    const prediction = await createPredictionWithWebhook(request, env, width, height);
+    const selectedModel = request.model || appConfig.defaults.model;
+    const prediction = await createPredictionWithWebhook(request, env, width, height, selectedModel, appConfig);
 
     // Use polling to wait for result (since webhook is disabled)
     const result = await Promise.race([
@@ -52,6 +72,7 @@ export async function generateWithReplicate(
       url: result.url,
       provider: 'replicate',
       elapsedMs: 0, // Will be set by caller
+      actualModel: getReplicateModel(selectedModel, appConfig), // 添加实际使用的模型端点
     };
   } catch (error) {
     if (error instanceof ImageGenerationError) {
@@ -73,18 +94,35 @@ async function createPredictionWithWebhook(
   request: GenerateImageRequest,
   env: Env,
   width: number,
-  height: number
+  height: number,
+  model: ImageModel,
+  appConfig: AppConfig
 ): Promise<{ id: string; status: string }> {
-  const input = {
-    prompt: request.prompt,
-    width,
-    height,
-    num_outputs: 1,
-    num_inference_steps: 20,
-    guidance_scale: 7.5,
-    scheduler: 'K_EULER',
-    seed: Math.floor(Math.random() * 1000000),
-  };
+  // 根据模型类型构建不同的input参数
+  let input: any;
+
+  if (model === 'flux-1.1-pro' || model === 'flux-1.1-dev' || model === 'flux-schnell') {
+    // Flux模型使用新的参数格式
+    input = {
+      prompt: request.prompt,
+      aspect_ratio: width === height ? "1:1" : width > height ? "16:9" : "9:16",
+      output_format: "webp",
+      safety_tolerance: 2,
+      seed: Math.floor(Math.random() * 1000000),
+    };
+  } else {
+    // 其他模型使用旧的SDXL格式
+    input = {
+      prompt: request.prompt,
+      width,
+      height,
+      num_outputs: 1,
+      num_inference_steps: 20,
+      guidance_scale: 7.5,
+      scheduler: 'K_EULER',
+      seed: Math.floor(Math.random() * 1000000),
+    };
+  }
 
   // Add style if provided
   if (request.style) {
@@ -95,10 +133,22 @@ async function createPredictionWithWebhook(
   // In production, you would use: `https://your-worker-domain.workers.dev${WEBHOOK_ENDPOINT}`
   const webhookUrl = null; // Disable webhook for development
 
+  const selectedModelId = getReplicateModel(model, appConfig);
+
   const requestBody: any = {
-    version: DEFAULT_MODEL,
     input,
   };
+
+  // 确定API URL和请求体格式
+  let apiUrl: string;
+  if (model === 'flux-1.1-pro' || model === 'flux-1.1-dev' || model === 'flux-schnell') {
+    // 新的Flux模型使用模型名称调用
+    apiUrl = `${REPLICATE_API_BASE}/models/${selectedModelId}/predictions`;
+  } else {
+    // 旧模型使用version字段和通用predictions端点
+    requestBody.version = selectedModelId;
+    apiUrl = `${REPLICATE_API_BASE}/predictions`;
+  }
 
   // Only add webhook if URL is provided
   if (webhookUrl) {
@@ -106,7 +156,17 @@ async function createPredictionWithWebhook(
     requestBody.webhook_events_filter = ['completed'];
   }
 
-  const response = await fetch(`${REPLICATE_API_BASE}/predictions`, {
+  console.log('Replicate API request:', {
+    url: apiUrl,
+    body: requestBody,
+    model: selectedModelId,
+    headers: {
+      'Authorization': `Token ${env.REPLICATE_API_TOKEN ? '[REDACTED]' : 'MISSING'}`,
+      'Content-Type': 'application/json',
+    }
+  });
+
+  const response = await fetch(apiUrl, {
     method: 'POST',
     headers: {
       'Authorization': `Token ${env.REPLICATE_API_TOKEN}`,
@@ -117,6 +177,13 @@ async function createPredictionWithWebhook(
 
   if (!response.ok) {
     const errorText = await response.text();
+    console.error('Replicate API error:', {
+      status: response.status,
+      statusText: response.statusText,
+      error: errorText,
+      url: apiUrl,
+      model: selectedModelId
+    });
     throw new Error(`Failed to create prediction: ${response.status} ${errorText}`);
   }
 
@@ -154,11 +221,28 @@ async function pollPrediction(
 
       switch (prediction.status) {
         case 'succeeded':
-          if (prediction.output && prediction.output.length > 0) {
-            return {
-              success: true,
-              url: prediction.output[0],
-            };
+          if (prediction.output) {
+            // Handle different output formats
+            let imageUrl: string;
+            if (Array.isArray(prediction.output)) {
+              // Old format (SDXL, etc.) - array of URLs
+              imageUrl = prediction.output[0];
+            } else if (typeof prediction.output === 'string') {
+              // New format (Flux 1.1 Pro) - single URL string
+              imageUrl = prediction.output;
+            } else {
+              return {
+                success: false,
+                error: 'Invalid output format',
+              };
+            }
+
+            if (imageUrl) {
+              return {
+                success: true,
+                url: imageUrl,
+              };
+            }
           }
           return {
             success: false,

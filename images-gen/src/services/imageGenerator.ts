@@ -170,10 +170,10 @@ async function generateWithProvider(
 
     switch (providerName) {
       case 'replicate':
-        result = await generateWithReplicate(request, env, providerConfig);
+        result = await generateWithReplicate(request, env, providerConfig, config);
         break;
       case 'fal':
-        result = await generateWithFal(request, env, providerConfig);
+        result = await generateWithFal(request, env, providerConfig, config);
         break;
       case 'unsplash':
         result = await generateWithUnsplash(request, env, providerConfig);

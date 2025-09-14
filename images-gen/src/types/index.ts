@@ -1,9 +1,11 @@
 // Environment bindings interface
 export interface Env {
   // Secrets
-  REPLICATE_API_TOKEN: string;
-  FAL_KEY: string;
-  UNSPLASH_ACCESS_KEY: string;
+  REPLICATE_API_TOKEN?: string;
+  FAL_KEY?: string;
+  UNSPLASH_ACCESS_KEY?: string;
+  API_KEY?: string;
+  WEBHOOK_SECRET?: string;
   R2_CUSTOM_DOMAIN?: string;
 
   // Environment variables
@@ -147,7 +149,10 @@ export interface GenerateImageRequest {
   width?: number;
   height?: number;
   style?: string;
+
+  // 更新：支持新的provider和模型选择
   provider?: 'replicate' | 'fal' | 'unsplash';
+  model?: ImageModel;  // 新增：模型选择参数
 }
 
 // 统一响应接口
@@ -176,6 +181,9 @@ export interface UnifiedImageResponse {
   // 可选：使用的提示词（当source为AI生成时）
   usedPrompt?: string;
 
+  // 可选：实际使用的模型端点（当source为AI生成时）
+  actualModel?: string;
+
   // 详细错误信息（失败时）
   details?: {
     originalUrlError?: string;
@@ -197,12 +205,39 @@ export interface GenerateImageResponse {
 export type ImageProvider = 'replicate' | 'fal' | 'unsplash' | 'default';
 export type ImageSource = 'original' | 'replicate' | 'fal' | 'unsplash' | 'emergency-fallback';
 
+// Model types
+export type ImageModel =
+  | 'flux-1.1-pro'      // Default - best quality
+  | 'flux-1.1-dev'      // Development version
+  | 'flux-schnell'      // Fast generation
+  | 'ideogram-turbo'    // Ideogram fast (via replicate/fal)
+  | 'ideogram-3.0';     // Ideogram latest (via replicate/fal)
+
+// Model configuration mapping
+export interface ModelConfig {
+  replicate: {
+    'flux-1.1-pro': string;
+    'flux-1.1-dev': string;
+    'flux-schnell': string;
+    'ideogram-turbo': string;
+    'ideogram-3.0': string;
+  };
+  fal: {
+    'flux-1.1-pro': string;
+    'flux-1.1-dev': string;
+    'flux-schnell': string;
+    'ideogram-turbo': string;
+    'ideogram-3.0': string;
+  };
+}
+
 export interface ProviderResult {
   success: boolean;
   url?: string;
   provider: ImageProvider;
   error?: string;
   elapsedMs: number;
+  actualModel?: string; // 实际使用的模型端点
 }
 
 // Configuration types
@@ -227,7 +262,10 @@ export interface AppConfig {
   defaults: {
     timeout: number;
     imageUrl: string;
+    model: ImageModel;  // 新增：默认模型
   };
+  // 新增：模型配置
+  models: ModelConfig;
   // 新增：URL验证配置
   urlValidation?: UrlValidationConfig;
   // 新增：图片下载配置
@@ -255,7 +293,7 @@ export interface GenerationState {
 export interface ReplicateResponse {
   id: string;
   status: 'starting' | 'processing' | 'succeeded' | 'failed' | 'canceled';
-  output?: string[];
+  output?: string[] | string; // Support both array (old models) and string (new Flux models)
   error?: string;
 }
 
@@ -329,6 +367,7 @@ export interface ImageProcessingResult {
   usedPrompt?: string;
   elapsedMs: number;
   error?: string;
+  actualModel?: string; // 实际使用的模型端点
   details?: {
     urlValidation?: UrlValidationResult;
     downloadError?: string;

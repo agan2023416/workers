@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>统一图片处理API测试页面</title>
+    <title>AI图片生成测试 - 支持多模型</title>
     <style>
         * {
             margin: 0;
@@ -42,6 +42,13 @@
         .header p {
             font-size: 1.1em;
             opacity: 0.9;
+        }
+
+        .model-info {
+            font-size: 0.9em;
+            color: #666;
+            margin-top: 5px;
+            font-style: italic;
         }
 
         .content {
@@ -253,8 +260,8 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🖼️ 统一图片处理API测试</h1>
-            <p>测试原文URL下载、AI生成备选和向后兼容性</p>
+            <h1>🎨 AI图片生成测试</h1>
+            <p>支持 Flux 1.1 Pro、Flux 1.1 Dev、Flux Schnell、Ideogram 等多种模型</p>
         </div>
 
         <div class="content">
@@ -307,40 +314,64 @@
                 </div>
 
                 <div class="test-card">
-                    <h4>🤖 测试3: 纯AI生成</h4>
-                    <p>测试向后兼容性，原有API调用方式</p>
+                    <h4>🤖 测试3: Replicate Provider</h4>
+                    <p><strong>端点:</strong> flux-1.1-pro → black-forest-labs/flux-1.1-pro (真正的1.1版本)</p>
                     <div class="form-group">
                         <input type="text" id="test3-prompt" placeholder="AI提示词" value="A futuristic cityscape at night">
                     </div>
                     <div class="form-group">
+                        <label for="test3-provider">Provider:</label>
                         <select id="test3-provider">
-                            <option value="">自动选择</option>
                             <option value="replicate">Replicate</option>
-                            <option value="fal">Fal</option>
-                            <option value="unsplash">Unsplash</option>
                         </select>
                     </div>
                     <div class="form-group">
-                        <input type="text" id="test3-article" placeholder="文章ID" value="test-legacy">
+                        <label for="test3-model">AI模型:</label>
+                        <select id="test3-model">
+                            <option value="flux-1.1-pro">FLUX 1.1 Pro (推荐)</option>
+                            <option value="flux-1.1-dev">FLUX 1.1 Dev</option>
+                            <option value="flux-schnell">FLUX Schnell</option>
+                            <option value="ideogram-turbo">Ideogram Turbo</option>
+                            <option value="ideogram-3.0">Ideogram 3.0</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <input type="text" id="test3-article" placeholder="文章ID" value="test-replicate">
                     </div>
                     <button class="btn" onclick="runTest3()">
                         <span id="test3-loading" style="display: none;" class="loading"></span>
-                        运行测试
+                        运行 Replicate 测试
                     </button>
                 </div>
 
                 <div class="test-card">
-                    <h4>📷 测试4: 仅原文URL</h4>
-                    <p>测试仅处理原文URL，无AI备选的情况</p>
+                    <h4>🔥 测试4: Fal.ai Provider</h4>
+                    <p><strong>端点:</strong> flux-1.1-pro → fal-ai/flux-pro (FLUX.1 Pro，非1.1版本)</p>
                     <div class="form-group">
-                        <input type="text" id="test4-url" placeholder="图片URL" value="https://picsum.photos/1024/768.jpg">
+                        <input type="text" id="test4-prompt" placeholder="AI提示词" value="A futuristic cityscape at night">
                     </div>
                     <div class="form-group">
-                        <input type="text" id="test4-article" placeholder="文章ID" value="test-original-only">
+                        <label for="test4-provider">Provider:</label>
+                        <select id="test4-provider">
+                            <option value="fal">Fal.ai</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="test4-model">AI模型:</label>
+                        <select id="test4-model">
+                            <option value="flux-1.1-pro">FLUX 1.1 Pro (映射到Flux.1 Pro)</option>
+                            <option value="flux-1.1-dev">FLUX 1.1 Dev</option>
+                            <option value="flux-schnell">FLUX Schnell</option>
+                            <option value="ideogram-turbo">Ideogram Turbo</option>
+                            <option value="ideogram-3.0">Ideogram 3.0</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <input type="text" id="test4-article" placeholder="文章ID" value="test-fal">
                     </div>
                     <button class="btn" onclick="runTest4()">
                         <span id="test4-loading" style="display: none;" class="loading"></span>
-                        运行测试
+                        运行 Fal.ai 测试
                     </button>
                 </div>
             </div>
@@ -450,9 +481,33 @@
             
             let resultContent = '';
             if (testResult.result) {
-                resultContent = JSON.stringify(testResult.result, null, 2);
+                // 格式化显示结果，突出显示关键信息
+                const result = testResult.result;
+                const modelUsed = testResult.payload.model || '无';
+                const isSuccess = result.success && result.source !== 'emergency-fallback';
+                const statusIcon = isSuccess ? '✅' : '❌';
+                const statusText = isSuccess ? '生成成功！' : '生成失败！';
+                const statusColor = isSuccess ? '#2e7d32' : '#d32f2f';
+
+                resultContent = `
+                    <div style="margin-bottom: 10px; color: ${statusColor};">
+                        <strong>${statusIcon} ${statusText}</strong><br>
+                        <strong>服务商:</strong> ${result.provider || 'unknown'}<br>
+                        ${testResult.payload.model ? `<strong>模型:</strong> ${modelUsed}<br>` : ''}
+                        ${result.actualModel ? `<strong>实际端点:</strong> ${result.actualModel}<br>` : ''}
+                        <strong>耗时:</strong> ${result.elapsedMs || 0}ms<br>
+                        ${result.r2Stored ? '<strong>✅ 已存储到R2</strong><br>' : ''}
+                        ${result.source ? `<strong>来源:</strong> ${result.source}<br>` : ''}
+                        ${result.error ? `<strong>错误:</strong> ${result.error}<br>` : ''}
+                        ${result.source === 'emergency-fallback' ? '<strong>⚠️ 使用了紧急备用图片</strong><br>' : ''}
+                    </div>
+                    <details>
+                        <summary>完整响应数据</summary>
+                        <pre>${JSON.stringify(result, null, 2)}</pre>
+                    </details>
+                `;
             } else if (testResult.error) {
-                resultContent = `错误: ${testResult.error}`;
+                resultContent = `<div style="color: #d32f2f;"><strong>❌ 错误:</strong> ${testResult.error}</div>`;
             }
 
             resultDiv.innerHTML = `
@@ -514,10 +569,10 @@
             setLoading('test2', false);
         }
 
-        // 测试3: 纯AI生成
+        // 测试3: 纯AI生成 (支持多模型)
         async function runTest3() {
             setLoading('test3', true);
-            
+
             const payload = {
                 prompt: document.getElementById('test3-prompt').value,
                 articleId: document.getElementById('test3-article').value
@@ -528,20 +583,32 @@
                 payload.provider = provider;
             }
 
-            await callAPI(payload, '🤖 测试3: 纯AI生成');
+            const model = document.getElementById('test3-model').value;
+            if (model) {
+                payload.model = model;
+            }
+
+            await callAPI(payload, `🤖 测试3: 纯AI生成 (${model || 'flux-1.1-pro'})`);
             setLoading('test3', false);
         }
 
-        // 测试4: 仅原文URL
+        // 测试4: Fal.ai Provider
         async function runTest4() {
             setLoading('test4', true);
-            
+
+            const prompt = document.getElementById('test4-prompt').value;
+            const provider = document.getElementById('test4-provider').value;
+            const model = document.getElementById('test4-model').value;
+            const articleId = document.getElementById('test4-article').value;
+
             const payload = {
-                imageUrl: document.getElementById('test4-url').value,
-                articleId: document.getElementById('test4-article').value
+                prompt: prompt,
+                articleId: articleId,
+                provider: provider,
+                model: model
             };
 
-            await callAPI(payload, '📷 测试4: 仅原文URL');
+            await callAPI(payload, `🔥 测试4: Fal.ai (${model || 'flux-1.1-pro'})`);
             setLoading('test4', false);
         }
 

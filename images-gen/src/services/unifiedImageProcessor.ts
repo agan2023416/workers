@@ -275,7 +275,8 @@ async function processAIGeneration(
         source: aiResult.provider as ImageSource,
         url: aiResult.url!,
         usedPrompt: request.prompt,
-        elapsedMs: stepDuration
+        elapsedMs: stepDuration,
+        actualModel: aiResult.actualModel // 传递实际使用的模型端点
       };
     } else {
       processingLog.steps.push({
@@ -336,16 +337,20 @@ async function generateImageWithFallback(
   // 如果指定了特定提供商
   if (request.provider) {
     console.log(`Using specified provider: ${request.provider}`);
-    
+
     switch (request.provider) {
       case 'replicate':
-        return await generateWithReplicate(request, env, Date.now(), baseUrl);
+        const replicateConfig = config.providers.replicate;
+        return await generateWithReplicate(request, env, replicateConfig, config);
       case 'fal':
-        return await generateWithFal(request, env, Date.now());
+        const falConfig = config.providers.fal;
+        return await generateWithFal(request, env, falConfig, config);
       case 'unsplash':
-        return await generateWithUnsplash(request, env, Date.now());
+        const unsplashConfig = config.providers.unsplash;
+        return await generateWithUnsplash(request, env, unsplashConfig);
       default:
-        return await generateWithUnsplash(request, env, Date.now());
+        const defaultUnsplashConfig = config.providers.unsplash;
+        return await generateWithUnsplash(request, env, defaultUnsplashConfig);
     }
   }
 
@@ -355,8 +360,9 @@ async function generateImageWithFallback(
   // 1. 尝试Replicate
   try {
     console.log('Trying Replicate AI...');
+    const replicateConfig = config.providers.replicate;
     const replicateResult = await Promise.race([
-      generateWithReplicate(request, env, Date.now(), baseUrl),
+      generateWithReplicate(request, env, replicateConfig, config),
       new Promise<any>((_, reject) =>
         setTimeout(() => reject(new Error('Replicate timeout')), 25000)
       )
@@ -367,14 +373,19 @@ async function generateImageWithFallback(
       return replicateResult;
     }
   } catch (error) {
-    console.log('Replicate AI failed:', error);
+    console.error('Replicate AI failed:', {
+      error: error instanceof Error ? error.message : error,
+      stack: error instanceof Error ? error.stack : undefined,
+      type: error?.constructor?.name
+    });
   }
 
   // 2. 尝试Fal
   try {
     console.log('Trying Fal AI...');
+    const falConfig = config.providers.fal;
     const falResult = await Promise.race([
-      generateWithFal(request, env, Date.now()),
+      generateWithFal(request, env, falConfig, config),
       new Promise<any>((_, reject) =>
         setTimeout(() => reject(new Error('Fal timeout')), 12000)
       )
@@ -385,13 +396,18 @@ async function generateImageWithFallback(
       return falResult;
     }
   } catch (error) {
-    console.log('Fal AI failed:', error);
+    console.error('Fal AI failed:', {
+      error: error instanceof Error ? error.message : error,
+      stack: error instanceof Error ? error.stack : undefined,
+      type: error?.constructor?.name
+    });
   }
 
   // 3. 最后尝试Unsplash
   try {
     console.log('Falling back to Unsplash...');
-    const unsplashResult = await generateWithUnsplash(request, env, Date.now());
+    const unsplashConfig = config.providers.unsplash;
+    const unsplashResult = await generateWithUnsplash(request, env, unsplashConfig);
     return unsplashResult;
   } catch (error) {
     console.error('All providers failed:', error);

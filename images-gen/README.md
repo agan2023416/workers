@@ -693,6 +693,65 @@ Use this ID to:
 
 MIT License - see LICENSE file for details.
 
+## 📖 API文档
+
+- 📋 **[完整API文档](./API_DOCUMENTATION.md)** - 详细的接口说明、参数、示例
+- ⚡ **[快速参考](./API_QUICK_REFERENCE.md)** - 常用示例和参数速查
+- 🎛️ **[供应商模型指南](./PROVIDER_MODEL_GUIDE.md)** - 如何选择和切换供应商/模型
+- 🧪 **[测试页面](https://your-worker.workers.dev/test)** - 交互式API测试
+
+### 快速示例
+
+```bash
+# AI图片生成（默认配置，推荐）
+curl -X POST https://your-worker.workers.dev/images/generate \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "A beautiful sunset over mountains"
+  }'
+
+# 指定Fal.ai快速生成
+curl -X POST https://your-worker.workers.dev/images/generate \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "Quick concept art",
+    "provider": "fal",
+    "model": "flux-schnell"
+  }'
+
+# 指定Replicate高质量生成
+curl -X POST https://your-worker.workers.dev/images/generate \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "Professional portrait photo",
+    "provider": "replicate",
+    "model": "flux-1.1-pro"
+  }'
+
+# 原始URL处理
+curl -X POST https://your-worker.workers.dev/images/generate \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"imageUrl": "https://example.com/image.jpg"}'
+```
+
+## 🤖 支持的AI模型
+
+| 供应商 | 模型 | 描述 | 推荐用途 | 特殊说明 |
+|--------|------|------|----------|----------|
+| **Replicate** 🥇 | `flux-1.1-pro` | 最高质量 ⭐ | 专业级图片 | **默认首选** |
+| **Fal.ai** 🥈 | `flux-schnell` | 最快速度 ⚡ | 快速原型 | 2-4秒生成 |
+| **Fal.ai** | `flux-1.1-pro` | 高质量 | 生产环境 | **尺寸受限** |
+| **Both** | `ideogram-turbo` | 文字图标 | Logo设计 | 文字渲染 |
+
+**⚠️ 重要提醒**：
+- **默认优先级**: Replicate → Fal.ai → Unsplash
+- **Fal.ai限制**: 不支持自定义尺寸，只能使用预定义枚举值
+- **推荐配置**: 不指定provider让系统自动选择最佳供应商
+
 ## Support
 
 For issues and questions:
@@ -700,4 +759,5 @@ For issues and questions:
 1. Check the troubleshooting section
 2. Review Cloudflare Workers logs
 3. Use admin endpoints for diagnostics
-4. Contact the development team
+4. 查看 [API文档](./API_DOCUMENTATION.md) 获取详细说明
+5. Contact the development team
