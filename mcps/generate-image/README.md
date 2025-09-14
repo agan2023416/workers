@@ -1,5 +1,7 @@
 # Generate Image MCP Server
 
+[![smithery badge](https://smithery.ai/badge/@agan2023416/workers)](https://smithery.ai/server/@agan2023416/workers)
+
 A Model Context Protocol (MCP) server that interfaces with the [replicate-2-r2](../replicate-2-r2) Cloudflare Worker to provide AI image generation capabilities.
 
 ## Features
@@ -12,6 +14,15 @@ A Model Context Protocol (MCP) server that interfaces with the [replicate-2-r2](
 
 ## Installation
 
+### Installing via Smithery
+
+To install workers for Claude Desktop automatically via [Smithery](https://smithery.ai/server/@agan2023416/workers):
+
+```bash
+npx -y @smithery/cli install @agan2023416/workers --client claude
+```
+
+### Manual Installation
 ```bash
 npm install
 ```
